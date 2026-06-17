@@ -16,36 +16,33 @@
         border: 1px solid green;
         background: black;
       }
+      /* Le bouton Rejouer : caché au départ, posé par-dessus le canvas, au centre */
+      #rejouer {
+        display: none; /* invisible tant que la partie tourne */
+        position: absolute;
+        top: 60%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 15px 30px;
+        font-size: 24px;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
     <canvas id="monCanvas" width="1000" height="1000"></canvas>
+    <button id="rejouer">Rejouer</button>
 
     <script>
       const canvas = document.getElementById("monCanvas");
       const ctx = canvas.getContext("2d");
 
-      // L'état de l'application
-      const etat = {
-        x: 500,
-        y: 500,
-        angle: -Math.PI / 2, // direction où il pointe (vers le haut au départ)
-        vitesseX: 0, // de combien il glisse à gauche/droite
-        vitesseY: 0, // de combien il glisse en haut/bas
-        // quelles flèches sont enfoncées en ce moment
-        touches: {
-          haut: false,
-          bas: false,
-          gauche: false,
-          droite: false,
-        },
-        // les listes d'objets qui apparaissent et disparaissent pendant le jeu
-        missiles: [], // les petites boules tirées avec Espace
-        asteroides: [], // les gros cailloux qui se déplacent
-        explosions: [], // les petites animations quand un astéroïde explose
-      };
+      // Taille du terrain de jeu (le canvas)
+      const LARGEUR = 1000;
+      const HAUTEUR = 1000;
 
       // Réglages du vaisseau (change ces nombres pour tester !)
+      const RAYON_VAISSEAU = 15; // taille du vaisseau (du centre à la pointe)
       const ACCELERATION = 0.2; // poussée de la flèche du haut
       const VITESSE_MAX = 8; // vitesse maximum
       const ROTATION = 0.07; // vitesse pour tourner
@@ -60,7 +57,50 @@
       const RAYON_AST = 40; // taille (bien plus gros que le vaisseau)
       const VITESSE_AST = 1; // vitesse faible
       const INTERVALLE_AST = 4000; // un nouvel astéroïde toutes les 4 secondes
-      const MAX_AST = 3; // 3 astéroïdes maximum en même temps
+      const MAX_AST = 4; // 4 astéroïdes maximum en même temps
+
+      // Réglages de l'invincibilité (après un choc)
+      const INVINCIBLE_DUREE = 2000; // durée d'invincibilité en ms (2 secondes)
+      const CLIGNOTEMENT = 150; // vitesse du clignotement en ms (plus petit = clignote plus vite)
+
+      // Fabrique un état neuf, comme au tout début d'une partie.
+      // On l'écrit ICI une seule fois : utilisé au lancement ET dans rejouer().
+      function etatInitial() {
+        return {
+          x: LARGEUR / 2,
+          y: HAUTEUR / 2,
+          angle: -Math.PI / 2, // direction où il pointe (vers le haut au départ)
+          vitesseX: 0, // de combien il glisse à gauche/droite
+          vitesseY: 0, // de combien il glisse en haut/bas
+          // quelles flèches sont enfoncées en ce moment
+          touches: {
+            haut: false,
+            bas: false,
+            gauche: false,
+            droite: false,
+          },
+          // les listes d'objets qui apparaissent et disparaissent pendant le jeu
+          missiles: [], // les petites boules tirées avec Espace
+          asteroides: [], // les gros cailloux qui se déplacent
+          explosions: [], // les petites animations quand un astéroïde explose
+          // le score et les points de vie
+          score: 0, // +10 à chaque astéroïde cassé
+          vies: 3, // les cœurs (3 maximum)
+          prochainCoeur: 100, // le prochain palier de score qui donnera un cœur
+          invincibleJusqua: 0, // repère de temps : invincible tant qu'on n'a pas dépassé ce moment
+          partieFinie: false, // devient vrai quand il n'y a plus de cœurs
+        };
+      }
+
+      // L'état de l'application
+      let etat = etatInitial();
+
+      // Distance entre deux points (a et b). Sert à détecter les collisions.
+      function distance(ax, ay, bx, by) {
+        const dx = ax - bx;
+        const dy = ay - by;
+        return Math.sqrt(dx * dx + dy * dy);
+      }
 
       // Quand on APPUIE sur une flèche
       document.addEventListener("keydown", function (event) {
@@ -77,9 +117,9 @@
           // rafale : on ignore ces répétitions pour n'avoir qu'UN missile par appui
           if (event.repeat) return;
 
-          // La pointe du triangle est à 15 px devant le centre du vaisseau
-          const x = etat.x + Math.cos(etat.angle) * 15;
-          const y = etat.y + Math.sin(etat.angle) * 15;
+          // La pointe du triangle est à RAYON_VAISSEAU devant le centre du vaisseau
+          const x = etat.x + Math.cos(etat.angle) * RAYON_VAISSEAU;
+          const y = etat.y + Math.sin(etat.angle) * RAYON_VAISSEAU;
 
           // Le missile part tout droit dans la direction où le vaisseau pointe
           etat.missiles.push({
@@ -109,19 +149,19 @@
 
       // Fabrique un nouvel astéroïde et l'ajoute à la liste
       function creerAsteroide() {
-        // Si on a déjà 3 astéroïdes, on ne fait rien
+        // Si on a déjà atteint le maximum d'astéroïdes, on ne fait rien
         if (etat.asteroides.length >= MAX_AST) return;
 
         // Il apparaît sur un bord au hasard de la map
         let x, y;
         if (Math.random() < 0.5) {
           // sur un bord vertical (gauche ou droite), HORS écran
-          x = Math.random() < 0.5 ? -RAYON_AST : 1000 + RAYON_AST;
-          y = Math.random() * 1000;
+          x = Math.random() < 0.5 ? -RAYON_AST : LARGEUR + RAYON_AST;
+          y = Math.random() * HAUTEUR;
         } else {
           // sur un bord horizontal (haut ou bas), HORS écran
-          x = Math.random() * 1000;
-          y = Math.random() < 0.5 ? -RAYON_AST : 1000 + RAYON_AST;
+          x = Math.random() * LARGEUR;
+          y = Math.random() < 0.5 ? -RAYON_AST : HAUTEUR + RAYON_AST;
         }
 
         // Direction au hasard mais VERS l'intérieur de la map :
@@ -156,20 +196,29 @@
 
       function rendu() {
         // Effacer tout l'écran
-        ctx.clearRect(0, 0, 1000, 1000);
+        ctx.clearRect(0, 0, LARGEUR, HAUTEUR);
+
+        // Est-ce que le vaisseau est invincible en ce moment ?
+        const invincible = Date.now() < etat.invincibleJusqua;
+        // Pendant l'invincibilité, on clignote : on n'affiche le vaisseau qu'une
+        // tranche de temps sur deux (les tranches paires). Sinon, on l'affiche toujours.
+        const afficherVaisseau =
+          !invincible || Math.floor(Date.now() / CLIGNOTEMENT) % 2 === 0;
 
         // Dessiner le vaisseau (un triangle vert)
-        ctx.fillStyle = "green";
-        ctx.save(); // on met de côté le repère normal
-        ctx.translate(etat.x, etat.y); // on se place sur le vaisseau
-        ctx.rotate(etat.angle); // on tourne selon l'angle
-        ctx.beginPath();
-        ctx.moveTo(15, 0); // la pointe (vers l'avant)
-        ctx.lineTo(-10, -10); // coin arrière gauche
-        ctx.lineTo(-10, 10); // coin arrière droit
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore(); // on remet le repère normal
+        if (afficherVaisseau) {
+          ctx.fillStyle = "green";
+          ctx.save(); // on met de côté le repère normal
+          ctx.translate(etat.x, etat.y); // on se place sur le vaisseau
+          ctx.rotate(etat.angle); // on tourne selon l'angle
+          ctx.beginPath();
+          ctx.moveTo(RAYON_VAISSEAU, 0); // la pointe (vers l'avant)
+          ctx.lineTo(-10, -10); // coin arrière gauche
+          ctx.lineTo(-10, 10); // coin arrière droit
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore(); // on remet le repère normal
+        }
 
         // Dessiner les missiles (petites boules blanches)
         ctx.fillStyle = "white";
@@ -206,87 +255,144 @@
           ctx.stroke();
           ctx.globalAlpha = 1; // on remet l'opacité normale
         }
+
+        // Dessiner le score (en haut à droite, en vert)
+        ctx.fillStyle = "green";
+        ctx.font = "24px sans-serif";
+        ctx.textAlign = "right"; // le texte s'aligne sur le bord droit
+        ctx.fillText("Score : " + etat.score, LARGEUR - 20, 40);
+        ctx.textAlign = "left"; // on remet l'alignement normal pour la suite
+
+        // Dessiner les cœurs (en haut à gauche, en rouge)
+        ctx.fillStyle = "red";
+        for (let i = 0; i < etat.vies; i++) {
+          ctx.fillText("❤", 20 + i * 30, 40); // un cœur tous les 30 px
+        }
+
+        // Si la partie est finie : message au centre
+        if (etat.partieFinie) {
+          ctx.fillStyle = "white";
+          ctx.font = "60px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("Partie terminée", LARGEUR / 2, 450);
+          ctx.textAlign = "left"; // on remet l'alignement normal
+        }
       }
 
-      function boucle() {
-        // Étape 3 : tourner avec gauche / droite
+      // Déplacer le vaisseau : rotation, accélération, freinage, inertie.
+      function deplacerVaisseau() {
+        // Tourner avec gauche / droite
         if (etat.touches.gauche) etat.angle -= ROTATION;
         if (etat.touches.droite) etat.angle += ROTATION;
 
-        // Étape 1 : accélérer dans la direction où le vaisseau pointe
+        // Accélérer dans la direction où le vaisseau pointe
         if (etat.touches.haut) {
           etat.vitesseX += Math.cos(etat.angle) * ACCELERATION;
           etat.vitesseY += Math.sin(etat.angle) * ACCELERATION;
         }
 
-        // Étape 2 : freiner avec la flèche du bas
+        // Freiner avec la flèche du bas
         if (etat.touches.bas) {
           etat.vitesseX *= FREINAGE;
           etat.vitesseY *= FREINAGE;
         }
 
-        // Étape 1 (suite) : ne pas dépasser la vitesse maximum
+        // Ne pas dépasser la vitesse maximum
         const vitesse = Math.sqrt(etat.vitesseX ** 2 + etat.vitesseY ** 2);
         if (vitesse > VITESSE_MAX) {
           etat.vitesseX = (etat.vitesseX / vitesse) * VITESSE_MAX;
           etat.vitesseY = (etat.vitesseY / vitesse) * VITESSE_MAX;
         }
 
-        // Étape 4 : frottement (ralentit tout seul)
+        // Frottement (ralentit tout seul)
         etat.vitesseX *= FROTTEMENT;
         etat.vitesseY *= FROTTEMENT;
 
-        // Étape 4 : inertie (on bouge selon la vitesse)
+        // Inertie (on bouge selon la vitesse)
         etat.x += etat.vitesseX;
         etat.y += etat.vitesseY;
 
         // Faire revenir le vaisseau de l'autre côté
-        if (etat.x > 1000) etat.x = 0;
-        if (etat.x < 0) etat.x = 1000;
-        if (etat.y > 1000) etat.y = 0;
-        if (etat.y < 0) etat.y = 1000;
+        if (etat.x > LARGEUR) etat.x = 0;
+        if (etat.x < 0) etat.x = LARGEUR;
+        if (etat.y > HAUTEUR) etat.y = 0;
+        if (etat.y < 0) etat.y = HAUTEUR;
+      }
 
-        // Déplacer les missiles
+      // Déplacer les missiles, et retirer ceux sortis de la map.
+      function deplacerMissiles() {
         for (const missile of etat.missiles) {
           missile.x += missile.vitesseX;
           missile.y += missile.vitesseY;
         }
 
-        // Faire disparaître les missiles sortis de la map
         etat.missiles = etat.missiles.filter(function (missile) {
           return (
             missile.x >= 0 &&
-            missile.x <= 1000 &&
+            missile.x <= LARGEUR &&
             missile.y >= 0 &&
-            missile.y <= 1000
+            missile.y <= HAUTEUR
           );
         });
+      }
 
-        // Déplacer les astéroïdes
+      // Déplacer les astéroïdes, et retirer ceux sortis de la map.
+      // (avec une marge égale au rayon, pour ne pas les couper pile au bord)
+      function deplacerAsteroides() {
         for (const ast of etat.asteroides) {
           ast.x += ast.vitesseX;
           ast.y += ast.vitesseY;
         }
 
-        // Faire disparaître les astéroïdes sortis de la map
-        // (avec une marge égale au rayon, pour ne pas les couper pile au bord)
         etat.asteroides = etat.asteroides.filter(function (ast) {
           return (
             ast.x >= -ast.rayon &&
-            ast.x <= 1000 + ast.rayon &&
+            ast.x <= LARGEUR + ast.rayon &&
             ast.y >= -ast.rayon &&
-            ast.y <= 1000 + ast.rayon
+            ast.y <= HAUTEUR + ast.rayon
           );
         });
+      }
 
-        // Collisions : est-ce qu'un missile touche un astéroïde ?
+      // Le vaisseau touche-t-il un astéroïde ? Si oui : on perd un cœur.
+      // (on ne teste pas si on est déjà invincible après un choc récent)
+      function gererCollisionVaisseau() {
+        if (Date.now() < etat.invincibleJusqua) return;
+
+        for (const ast of etat.asteroides) {
+          const d = distance(etat.x, etat.y, ast.x, ast.y);
+
+          // le vaisseau fait son rayon, l'astéroïde a le sien
+          if (d < ast.rayon + RAYON_VAISSEAU) {
+            etat.vies -= 1; // on perd un cœur
+
+            // On remet le vaisseau au centre, à l'arrêt
+            etat.x = LARGEUR / 2;
+            etat.y = HAUTEUR / 2;
+            etat.vitesseX = 0;
+            etat.vitesseY = 0;
+
+            // On devient invincible pendant 2 secondes pour se replacer
+            etat.invincibleJusqua = Date.now() + INVINCIBLE_DUREE;
+
+            // Plus de cœurs : la partie est finie
+            if (etat.vies <= 0) {
+              etat.partieFinie = true;
+              document.getElementById("rejouer").style.display = "block";
+            }
+
+            break; // un seul choc à la fois, on arrête de tester les astéroïdes
+          }
+        }
+      }
+
+      // Un missile touche-t-il un astéroïde ? Si oui : explosion, score, cœurs.
+      function gererTirs() {
         for (const missile of etat.missiles) {
           for (const ast of etat.asteroides) {
-            const dx = missile.x - ast.x;
-            const dy = missile.y - ast.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
+            const d = distance(missile.x, missile.y, ast.x, ast.y);
 
-            if (distance < ast.rayon) {
+            if (d < ast.rayon) {
               // Touché ! On marque les deux pour les retirer
               missile.touche = true;
               ast.touche = true;
@@ -298,6 +404,16 @@
                 rayon: 5,
                 vie: 20,
               });
+
+              // Le score augmente de 10 pour chaque astéroïde cassé
+              etat.score += 10;
+
+              // Tous les 100 points : on gagne un cœur (mais 3 maximum)
+              // On utilise un while au cas où on franchit plusieurs paliers d'un coup
+              while (etat.score >= etat.prochainCoeur) {
+                if (etat.vies < 3) etat.vies += 1; // sinon (déjà 3) : on n'ajoute rien
+                etat.prochainCoeur += 100; // on passe au palier suivant
+              }
             }
           }
         }
@@ -309,23 +425,48 @@
         etat.asteroides = etat.asteroides.filter(function (ast) {
           return !ast.touche;
         });
+      }
 
-        // Faire vivre les explosions : elles grandissent puis s'effacent
+      // Faire vivre les explosions : elles grandissent puis disparaissent.
+      function animerExplosions() {
         for (const explosion of etat.explosions) {
           explosion.rayon += 2; // le cercle grandit
           explosion.vie -= 1; // et se rapproche de la fin
         }
 
-        // Retirer les explosions terminées
         etat.explosions = etat.explosions.filter(function (explosion) {
           return explosion.vie > 0;
         });
+      }
 
+      // La boucle du jeu : à lire de haut en bas, ça résume tout le jeu.
+      function boucle() {
+        deplacerVaisseau();
+        deplacerMissiles();
+        deplacerAsteroides();
+        gererCollisionVaisseau();
+        gererTirs();
+        animerExplosions();
         rendu();
+
+        // Si la partie est finie, on ne relance pas la boucle : le jeu se fige
+        if (etat.partieFinie) return;
 
         // Recommencer la boucle
         requestAnimationFrame(boucle);
       }
+
+      // Relancer une nouvelle partie : on remet tout l'état à zéro
+      function rejouer() {
+        etat = etatInitial();
+
+        // On cache le bouton et on relance la boucle
+        document.getElementById("rejouer").style.display = "none";
+        boucle();
+      }
+
+      // Quand on clique sur le bouton Rejouer
+      document.getElementById("rejouer").addEventListener("click", rejouer);
 
       // Lancer la boucle
       boucle();
