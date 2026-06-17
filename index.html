@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Mon vaisseau</title>
+
+    <style>
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+      canvas {
+        border: 1px solid green;
+        background: black;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="monCanvas" width="1000" height="1000"></canvas>
+
+    <script>
+      const canvas = document.getElementById("monCanvas");
+      const ctx = canvas.getContext("2d");
+
+      // L'état de l'application
+      const etat = {
+        x: 500,
+        y: 500,
+        angle: -Math.PI / 2, // direction où il pointe (vers le haut au départ)
+        vitesseX: 0, // de combien il glisse à gauche/droite
+        vitesseY: 0, // de combien il glisse en haut/bas
+        // quelles flèches sont enfoncées en ce moment
+        touches: {
+          haut: false,
+          bas: false,
+          gauche: false,
+          droite: false,
+        },
+      };
+
+      // Réglages du vaisseau (change ces nombres pour tester !)
+      const ACCELERATION = 0.2; // poussée de la flèche du haut
+      const VITESSE_MAX = 8; // vitesse maximum
+      const ROTATION = 0.07; // vitesse pour tourner
+      const FROTTEMENT = 0.99; // ralentit doucement tout seul
+      const FREINAGE = 0.95; // ralentit vite avec la flèche du bas
+
+     // Quand on APPUIE sur une flèche
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "ArrowUp") etat.touches.haut = true;
+        if (event.key === "ArrowDown") etat.touches.bas = true;
+        if (event.key === "ArrowLeft") etat.touches.gauche = true;
+        if (event.key === "ArrowRight") etat.touches.droite = true;
+      });
+
+      // Quand on RELÂCHE une flèche
+      document.addEventListener("keyup", function (event) {
+        if (event.key === "ArrowUp") etat.touches.haut = false;
+        if (event.key === "ArrowDown") etat.touches.bas = false;
+        if (event.key === "ArrowLeft") etat.touches.gauche = false;
+        if (event.key === "ArrowRight") etat.touches.droite = false;
+      });
+
+      // Quand la page perd le focus (on clique ailleurs) : on relâche tout
+      window.addEventListener("blur", function () {
+        etat.touches.haut = false;
+        etat.touches.bas = false;
+        etat.touches.gauche = false;
+        etat.touches.droite = false;
+      });
+
+      function rendu() {
+        // Effacer tout l'écran
+        ctx.clearRect(0, 0, 1000, 1000);
+
+        // Dessiner le vaisseau (un triangle vert)
+        ctx.fillStyle = "green";
+        ctx.save(); // on met de côté le repère normal
+        ctx.translate(etat.x, etat.y); // on se place sur le vaisseau
+        ctx.rotate(etat.angle); // on tourne selon l'angle
+        ctx.beginPath();
+        ctx.moveTo(15, 0); // la pointe (vers l'avant)
+        ctx.lineTo(-10, -10); // coin arrière gauche
+        ctx.lineTo(-10, 10); // coin arrière droit
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore(); // on remet le repère normal
+      }
+
+      function boucle() {
+        // Étape 3 : tourner avec gauche / droite
+        if (etat.touches.gauche) etat.angle -= ROTATION;
+        if (etat.touches.droite) etat.angle += ROTATION;
+
+        // Étape 1 : accélérer dans la direction où le vaisseau pointe
+        if (etat.touches.haut) {
+          etat.vitesseX += Math.cos(etat.angle) * ACCELERATION;
+          etat.vitesseY += Math.sin(etat.angle) * ACCELERATION;
+        }
+
+        // Étape 2 : freiner avec la flèche du bas
+        if (etat.touches.bas) {
+          etat.vitesseX *= FREINAGE;
+          etat.vitesseY *= FREINAGE;
+        }
+
+        // Étape 1 (suite) : ne pas dépasser la vitesse maximum
+        const vitesse = Math.sqrt(etat.vitesseX ** 2 + etat.vitesseY ** 2);
+        if (vitesse > VITESSE_MAX) {
+          etat.vitesseX = (etat.vitesseX / vitesse) * VITESSE_MAX;
+          etat.vitesseY = (etat.vitesseY / vitesse) * VITESSE_MAX;
+        }
+
+        // Étape 4 : frottement (ralentit tout seul)
+        etat.vitesseX *= FROTTEMENT;
+        etat.vitesseY *= FROTTEMENT;
+
+        // Étape 4 : inertie (on bouge selon la vitesse)
+        etat.x += etat.vitesseX;
+        etat.y += etat.vitesseY;
+
+        // Faire revenir le vaisseau de l'autre côté
+        if (etat.x > 1000) etat.x = 0;
+        if (etat.x < 0) etat.x = 1000;
+        if (etat.y > 1000) etat.y = 0;
+        if (etat.y < 0) etat.y = 1000;
+
+        rendu();
+
+        // Recommencer la boucle
+        requestAnimationFrame(boucle);
+      }
+
+      // Lancer la boucle
+      boucle();
+    </script>
+  </body>
+</html>
