@@ -39,6 +39,10 @@
           gauche: false,
           droite: false,
         },
+        // les listes d'objets qui apparaissent et disparaissent pendant le jeu
+        missiles: [], // les petites boules tirées avec Espace
+        asteroides: [], // les gros cailloux qui se déplacent
+        explosions: [], // les petites animations quand un astéroïde explose
       };
 
       // Réglages du vaisseau (change ces nombres pour tester !)
@@ -48,12 +52,43 @@
       const FROTTEMENT = 0.99; // ralentit doucement tout seul
       const FREINAGE = 0.95; // ralentit vite avec la flèche du bas
 
-     // Quand on APPUIE sur une flèche
+      // Réglages des missiles
+      const VITESSE_MISSILE = 10; // vitesse des boules
+      const RAYON_MISSILE = 4; // taille des boules
+
+      // Réglages des astéroïdes
+      const RAYON_AST = 40; // taille (bien plus gros que le vaisseau)
+      const VITESSE_AST = 1; // vitesse faible
+      const INTERVALLE_AST = 4000; // un nouvel astéroïde toutes les 4 secondes
+      const MAX_AST = 3; // 3 astéroïdes maximum en même temps
+
+      // Quand on APPUIE sur une flèche
       document.addEventListener("keydown", function (event) {
         if (event.key === "ArrowUp") etat.touches.haut = true;
         if (event.key === "ArrowDown") etat.touches.bas = true;
         if (event.key === "ArrowLeft") etat.touches.gauche = true;
         if (event.key === "ArrowRight") etat.touches.droite = true;
+
+        // Barre Espace : on crée un missile à la pointe du triangle
+        if (event.key === " ") {
+          event.preventDefault(); // empêche la page de défiler
+
+          // Si la touche est juste MAINTENUE, le navigateur renvoie keydown en
+          // rafale : on ignore ces répétitions pour n'avoir qu'UN missile par appui
+          if (event.repeat) return;
+
+          // La pointe du triangle est à 15 px devant le centre du vaisseau
+          const x = etat.x + Math.cos(etat.angle) * 15;
+          const y = etat.y + Math.sin(etat.angle) * 15;
+
+          // Le missile part tout droit dans la direction où le vaisseau pointe
+          etat.missiles.push({
+            x: x,
+            y: y,
+            vitesseX: Math.cos(etat.angle) * VITESSE_MISSILE,
+            vitesseY: Math.sin(etat.angle) * VITESSE_MISSILE,
+          });
+        }
       });
 
       // Quand on RELÂCHE une flèche
@@ -72,6 +107,53 @@
         etat.touches.droite = false;
       });
 
+      // Fabrique un nouvel astéroïde et l'ajoute à la liste
+      function creerAsteroide() {
+        // Si on a déjà 3 astéroïdes, on ne fait rien
+        if (etat.asteroides.length >= MAX_AST) return;
+
+        // Il apparaît sur un bord au hasard de la map
+        let x, y;
+        if (Math.random() < 0.5) {
+          // sur un bord vertical (gauche ou droite), HORS écran
+          x = Math.random() < 0.5 ? -RAYON_AST : 1000 + RAYON_AST;
+          y = Math.random() * 1000;
+        } else {
+          // sur un bord horizontal (haut ou bas), HORS écran
+          x = Math.random() * 1000;
+          y = Math.random() < 0.5 ? -RAYON_AST : 1000 + RAYON_AST;
+        }
+
+        // Direction au hasard mais VERS l'intérieur de la map :
+        // on vise un point au hasard vers le centre, et on calcule l'angle
+        // qui va de l'astéroïde vers ce point.
+        const cibleX = 200 + Math.random() * 600; // entre 200 et 800
+        const cibleY = 200 + Math.random() * 600; // entre 200 et 800
+        const angle = Math.atan2(cibleY - y, cibleX - x);
+
+        // On fabrique une forme irrégulière (pas un rond parfait) :
+        // ~10 points autour du centre, chacun avec un rayon un peu au hasard
+        const points = [];
+        const nbPoints = 10;
+        for (let i = 0; i < nbPoints; i++) {
+          const a = (i / nbPoints) * Math.PI * 2; // angle de ce sommet
+          const r = RAYON_AST * (0.7 + Math.random() * 0.6); // rayon cabossé
+          points.push({ dx: Math.cos(a) * r, dy: Math.sin(a) * r });
+        }
+
+        etat.asteroides.push({
+          x: x,
+          y: y,
+          vitesseX: Math.cos(angle) * VITESSE_AST,
+          vitesseY: Math.sin(angle) * VITESSE_AST,
+          rayon: RAYON_AST,
+          points: points,
+        });
+      }
+
+      // Toutes les 4 secondes, on essaie de créer un astéroïde
+      setInterval(creerAsteroide, INTERVALLE_AST);
+
       function rendu() {
         // Effacer tout l'écran
         ctx.clearRect(0, 0, 1000, 1000);
@@ -88,6 +170,42 @@
         ctx.closePath();
         ctx.fill();
         ctx.restore(); // on remet le repère normal
+
+        // Dessiner les missiles (petites boules blanches)
+        ctx.fillStyle = "white";
+        for (const missile of etat.missiles) {
+          ctx.beginPath();
+          ctx.arc(missile.x, missile.y, RAYON_MISSILE, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Dessiner les astéroïdes (contour vert, intérieur noir, forme cabossée)
+        for (const ast of etat.asteroides) {
+          ctx.save();
+          ctx.translate(ast.x, ast.y); // on se place sur l'astéroïde
+          ctx.beginPath();
+          ctx.moveTo(ast.points[0].dx, ast.points[0].dy);
+          for (let i = 1; i < ast.points.length; i++) {
+            ctx.lineTo(ast.points[i].dx, ast.points[i].dy);
+          }
+          ctx.closePath();
+          ctx.fillStyle = "black"; // intérieur noir
+          ctx.fill();
+          ctx.strokeStyle = "green"; // contour vert
+          ctx.lineWidth = 4;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        // Dessiner les explosions (cercle qui grandit et s'estompe)
+        for (const explosion of etat.explosions) {
+          ctx.globalAlpha = explosion.vie / 20; // de plus en plus transparent
+          ctx.beginPath();
+          ctx.arc(explosion.x, explosion.y, explosion.rayon, 0, Math.PI * 2);
+          ctx.strokeStyle = "orange";
+          ctx.stroke();
+          ctx.globalAlpha = 1; // on remet l'opacité normale
+        }
       }
 
       function boucle() {
@@ -127,6 +245,81 @@
         if (etat.x < 0) etat.x = 1000;
         if (etat.y > 1000) etat.y = 0;
         if (etat.y < 0) etat.y = 1000;
+
+        // Déplacer les missiles
+        for (const missile of etat.missiles) {
+          missile.x += missile.vitesseX;
+          missile.y += missile.vitesseY;
+        }
+
+        // Faire disparaître les missiles sortis de la map
+        etat.missiles = etat.missiles.filter(function (missile) {
+          return (
+            missile.x >= 0 &&
+            missile.x <= 1000 &&
+            missile.y >= 0 &&
+            missile.y <= 1000
+          );
+        });
+
+        // Déplacer les astéroïdes
+        for (const ast of etat.asteroides) {
+          ast.x += ast.vitesseX;
+          ast.y += ast.vitesseY;
+        }
+
+        // Faire disparaître les astéroïdes sortis de la map
+        // (avec une marge égale au rayon, pour ne pas les couper pile au bord)
+        etat.asteroides = etat.asteroides.filter(function (ast) {
+          return (
+            ast.x >= -ast.rayon &&
+            ast.x <= 1000 + ast.rayon &&
+            ast.y >= -ast.rayon &&
+            ast.y <= 1000 + ast.rayon
+          );
+        });
+
+        // Collisions : est-ce qu'un missile touche un astéroïde ?
+        for (const missile of etat.missiles) {
+          for (const ast of etat.asteroides) {
+            const dx = missile.x - ast.x;
+            const dy = missile.y - ast.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < ast.rayon) {
+              // Touché ! On marque les deux pour les retirer
+              missile.touche = true;
+              ast.touche = true;
+
+              // On déclenche une explosion à la position de l'astéroïde
+              etat.explosions.push({
+                x: ast.x,
+                y: ast.y,
+                rayon: 5,
+                vie: 20,
+              });
+            }
+          }
+        }
+
+        // On retire les missiles et astéroïdes qui ont été touchés
+        etat.missiles = etat.missiles.filter(function (missile) {
+          return !missile.touche;
+        });
+        etat.asteroides = etat.asteroides.filter(function (ast) {
+          return !ast.touche;
+        });
+
+        // Faire vivre les explosions : elles grandissent puis s'effacent
+        for (const explosion of etat.explosions) {
+          explosion.rayon += 2; // le cercle grandit
+          explosion.vie -= 1; // et se rapproche de la fin
+        }
+
+        // Retirer les explosions terminées
+        etat.explosions = etat.explosions.filter(function (explosion) {
+          return explosion.vie > 0;
+        });
 
         rendu();
 
