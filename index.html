@@ -206,6 +206,7 @@
       const VITESSE_ORBITE = 0.03; // vitesse de rotation autour (radians par image)
       const TAILLE_VAISSEAU = 10; // taille des petits vaisseaux
       const INTERVALLE_TIR = 500; // un tir toutes les 500 ms par vaisseau
+      const MAX_VAISSEAUX = 5; // au-delà, on ne peut plus en ajouter : il faut fusionner
       // Couleur des vaisseaux selon le nombre de merges (0 = cyan, 1 = rouge, ...)
       const COULEURS_VAISSEAU = [
         "cyan",
@@ -1081,6 +1082,10 @@
         {
           nom: "Ajouter un vaisseau",
           cout: 25,
+          // impossible si on est déjà au maximum : il faut alors fusionner
+          possible: function () {
+            return etat.vaisseaux.length < MAX_VAISSEAUX;
+          },
           appliquer: function () {
             // un vaisseau neuf est toujours au niveau de base (0)
             etat.vaisseaux.push({ angle: 0, prochainTir: 0, niveau: 0 });
