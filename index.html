@@ -253,6 +253,8 @@
       const PIECES_AST = 6; // pièces de base d'un astéroïde
       const PIECES_ALIEN = 10; // pièces de base d'un alien (plus fort)
       const RAYON_PIECE = 8; // taille d'une pièce posée au sol
+      const PORTEE_AIMANT = 150; // distance à laquelle les pièces sont attirées
+      const VITESSE_AIMANT = 8; // vitesse à laquelle une pièce attirée se rapproche
 
       // Réglages de l'invincibilité (après un choc)
       const INVINCIBLE_DUREE = 2000; // durée d'invincibilité en ms (2 secondes)
@@ -875,10 +877,14 @@
       // l'inventaire (etat.pieces) et la pièce disparaît du sol.
       function ramasserPieces() {
         for (const p of etat.piecesAuSol) {
-          if (
-            distance(etat.x, etat.y, p.x, p.y) <
-            RAYON_VAISSEAU + RAYON_PIECE
-          ) {
+          const d = distance(etat.x, etat.y, p.x, p.y);
+          // Dans la portée de l'aimant : la pièce est attirée vers le personnage.
+          if (d < PORTEE_AIMANT && d > 0) {
+            p.x += ((etat.x - p.x) / d) * VITESSE_AIMANT;
+            p.y += ((etat.y - p.y) / d) * VITESSE_AIMANT;
+          }
+          // Assez proche : on la ramasse.
+          if (d < RAYON_VAISSEAU + RAYON_PIECE) {
             etat.pieces += p.valeur;
             p.ramassee = true;
           }
