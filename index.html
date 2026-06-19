@@ -6,14 +6,11 @@
 
     <style>
       body {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
         margin: 0;
+        overflow: hidden; /* pas de barres de défilement */
       }
       canvas {
-        border: 1px solid green;
+        display: block; /* colle le canvas en haut à gauche, sans espace autour */
         background: black;
       }
       /* Le bouton Rejouer : caché au départ, posé par-dessus le canvas, au centre */
@@ -27,37 +24,233 @@
         font-size: 24px;
         cursor: pointer;
       }
+      /* Le bouton Pause : en haut à droite, juste sous le score.
+         Il affiche deux barres parallèles (icône pause), ou un triangle
+         "lecture" quand le jeu est en pause (classe .lecture). */
+      #pause {
+        position: absolute;
+        top: 95px; /* bien en dessous du score */
+        right: 40px;
+        width: 60px;
+        height: 50px;
+        padding: 0;
+        cursor: pointer;
+        background: transparent; /* bouton transparent */
+        border: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 9px;
+      }
+      /* les deux barres parallèles (en blanc pour être visibles sur le fond noir) */
+      #pause::before,
+      #pause::after {
+        content: "";
+        width: 9px;
+        height: 28px;
+        background: white;
+      }
+      /* en pause : un triangle "lecture" à la place des deux barres */
+      #pause.lecture::before {
+        width: 0;
+        height: 0;
+        border-style: solid;
+        border-width: 14px 0 14px 24px;
+        border-color: transparent transparent transparent white;
+      }
+      #pause.lecture::after {
+        display: none;
+      }
+      /* Le bouton qui ouvre le menu des améliorations : en bas au centre */
+      #boutique {
+        position: absolute;
+        bottom: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 14px 30px;
+        font-size: 22px;
+        cursor: pointer;
+      }
+      /* Le menu des améliorations : voile plein écran, caché par défaut */
+      #ameliorations {
+        display: none; /* devient "flex" quand on l'ouvre (classe .ouvert) */
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.85);
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: sans-serif;
+      }
+      #ameliorations.ouvert {
+        display: flex;
+      }
+      #ameliorations h2 {
+        font-size: 48px;
+        margin: 0 0 10px;
+      }
+      #boutique-pieces {
+        font-size: 28px;
+        color: gold;
+        margin: 0;
+      }
+      #boutique-liste {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        margin: 34px 0;
+      }
+      /* amélioration ACHETABLE : bien claire (fond blanc) */
+      #boutique-liste button {
+        min-width: 420px;
+        padding: 20px 32px;
+        font-size: 24px;
+        cursor: pointer;
+        background: white;
+        color: black;
+        border: 2px solid white;
+        border-radius: 10px;
+      }
+      /* amélioration trop chère (ou impossible) : grisée et non cliquable */
+      #boutique-liste button:disabled {
+        opacity: 0.35;
+        cursor: default;
+      }
+      #fermer-boutique {
+        padding: 16px 40px;
+        font-size: 24px;
+        cursor: pointer;
+        border-radius: 10px;
+      }
     </style>
   </head>
   <body>
-    <canvas id="monCanvas" width="1000" height="1000"></canvas>
+    <canvas id="monCanvas"></canvas>
     <button id="rejouer">Rejouer</button>
+    <button id="pause" aria-label="Pause"></button>
+    <button id="boutique">Améliorations</button>
+
+    <!-- Le menu des améliorations (rempli par le JavaScript) -->
+    <div id="ameliorations">
+      <h2>Améliorations</h2>
+      <p id="boutique-pieces">Pièces : 0</p>
+      <div id="boutique-liste"></div>
+      <button id="fermer-boutique">Fermer</button>
+    </div>
 
     <script>
       const canvas = document.getElementById("monCanvas");
       const ctx = canvas.getContext("2d");
 
-      // Taille du terrain de jeu (le canvas)
-      const LARGEUR = 1000;
-      const HAUTEUR = 1000;
+      // ZOOM : à quel point on grossit tout le jeu. Mets 2 pour x2 plus gros,
+      // 3 pour x3, etc. C'est LE chiffre à changer si tout te paraît trop petit
+      // ou trop gros. (1 = taille d'origine, où le terrain faisait 1000 px.)
+      const ZOOM = 2;
+
+      // Taille du terrain de jeu en pixels LOGIQUES (ceux qu'on utilise pour
+      // dessiner). Comme on zoome, le terrain logique est plus petit que l'écran
+      // (ex : écran 1920 px, ZOOM 2 -> terrain logique de 960). Les objets, eux,
+      // gardent leur taille (15, 40...) donc ils paraissent ZOOM fois plus gros.
+      // "let" car ces valeurs changent au redimensionnement (voir configurerCanvas).
+      let LARGEUR = window.innerWidth / ZOOM;
+      let HAUTEUR = window.innerHeight / ZOOM;
+
+      // Adapte le canvas à la fenêtre, au ZOOM, ET à la finesse de l'écran.
+      // Un écran mobile a souvent 2 ou 3 VRAIS pixels pour 1 pixel logique :
+      // c'est le "device pixel ratio" (DPR). Sans en tenir compte, tout est flou.
+      function configurerCanvas() {
+        LARGEUR = window.innerWidth / ZOOM;
+        HAUTEUR = window.innerHeight / ZOOM;
+
+        // Combien de vrais pixels pour 1 pixel logique (1 sur un écran normal,
+        // 2 ou 3 sur beaucoup de mobiles). On limite à 3 pour ne pas trop charger.
+        const dpr = Math.min(window.devicePixelRatio || 1, 3);
+
+        // Le canvas occupe toute la fenêtre à l'écran (taille en CSS)...
+        canvas.style.width = window.innerWidth + "px";
+        canvas.style.height = window.innerHeight + "px";
+
+        // ...mais on lui donne DPR fois plus de vrais pixels dessous (netteté).
+        canvas.width = Math.round(window.innerWidth * dpr);
+        canvas.height = Math.round(window.innerHeight * dpr);
+
+        // On combine le ZOOM et le DPR en UNE SEULE échelle, appliquée ici une
+        // fois pour toutes : le contexte multiplie ensuite tout seul chaque
+        // coordonnée. Du coup on continue à dessiner avec LARGEUR/HAUTEUR sans
+        // rien multiplier à la main. setTransform remet le repère à zéro avant
+        // (utile car changer canvas.width réinitialise le contexte).
+        const echelle = ZOOM * dpr;
+        ctx.setTransform(echelle, 0, 0, echelle, 0, 0);
+      }
+
+      // On configure tout de suite, puis à chaque changement de taille de fenêtre
+      configurerCanvas();
+      window.addEventListener("resize", configurerCanvas);
 
       // Réglages du vaisseau (change ces nombres pour tester !)
       const RAYON_VAISSEAU = 15; // taille du vaisseau (du centre à la pointe)
-      const ACCELERATION = 0.2; // poussée de la flèche du haut
+      const ACCELERATION = 0.5; // poussée des flèches (plus grand = plus nerveux)
       const VITESSE_MAX = 8; // vitesse maximum
-      const ROTATION = 0.07; // vitesse pour tourner
-      const FROTTEMENT = 0.99; // ralentit doucement tout seul
-      const FREINAGE = 0.95; // ralentit vite avec la flèche du bas
+      const FROTTEMENT = 0.9; // ralentit tout seul quand on lâche les flèches
+      const PV_MAX = 60; // points de vie du personnage au départ
 
       // Réglages des missiles
       const VITESSE_MISSILE = 10; // vitesse des boules
       const RAYON_MISSILE = 4; // taille des boules
+      const DEGATS_MISSILE = 10; // points de vie enlevés à l'ennemi touché
+
+      // Réglages des vaisseaux qui tournent autour du personnage
+      const RAYON_ORBITE = 60; // distance entre le personnage et ses vaisseaux
+      const VITESSE_ORBITE = 0.03; // vitesse de rotation autour (radians par image)
+      const TAILLE_VAISSEAU = 10; // taille des petits vaisseaux
+      const INTERVALLE_TIR = 500; // un tir toutes les 500 ms par vaisseau
+      // Couleur des vaisseaux selon le nombre de merges (0 = cyan, 1 = rouge, ...)
+      const COULEURS_VAISSEAU = [
+        "cyan",
+        "red",
+        "lime",
+        "yellow",
+        "magenta",
+        "orange",
+        "white",
+      ];
 
       // Réglages des astéroïdes
       const RAYON_AST = 40; // taille (bien plus gros que le vaisseau)
       const VITESSE_AST = 1; // vitesse faible
-      const INTERVALLE_AST = 4000; // un nouvel astéroïde toutes les 4 secondes
-      const MAX_AST = 4; // 4 astéroïdes maximum en même temps
+      const PV_AST = 10; // points de vie de l'astéroïde (meurt en 1 missile)
+      const DEGATS_AST = 10; // dégâts de base (augmentent avec les vagues)
+      const POINTS_AST = 10; // points de score gagnés quand on le détruit
+
+      // Réglages des aliens (plus petits et plus rapides que les astéroïdes)
+      const RAYON_ALIEN = 25; // taille de l'alien
+      const VITESSE_ALIEN = 1.4; // un peu plus rapide que l'astéroïde
+      const PV_ALIEN = 20; // points de vie de l'alien (meurt en 2 missiles)
+      const DEGATS_ALIEN = 15; // dégâts de base (augmentent avec les vagues)
+      const POINTS_ALIEN = 15; // points de score gagnés quand on le détruit
+
+      // Réglages des tirs d'aliens
+      const VITESSE_TIR_ALIEN = 4; // vitesse du tir
+      const RAYON_TIR_ALIEN = 5; // taille du tir
+      const INTERVALLE_TIR_ALIEN = 2000; // chaque alien tire toutes les 2 secondes
+
+      // Réglages des vagues
+      const INTERVALLE_SPAWN = 550; // temps entre 2 apparitions d'ennemis (ms)
+      const BOSS_TOUTES_LES = 10; // grosse vague toutes les 10 vagues
+      const BOSS_FACTEUR = 2; // 2x plus d'ennemis sur une grosse vague
+      const VAGUE_ALIENS = 5; // les aliens apparaissent à partir de cette vague
+      const FORCE_FACTEUR = 1.2; // dégâts des ennemis x1.2 toutes les 5 vagues
+      const PV_FACTEUR_VAGUE = 0.2; // +20% des PV de base des ennemis toutes les 5 vagues
+      const MAX_ENNEMIS_BASE = 9; // ennemis max à l'écran au départ
+      const MAX_ENNEMIS_BONUS = 2; // +2 au max toutes les 10 vagues
+
+      // Réglages des pièces (lâchées par les ennemis tués). Plus un ennemi est
+      // fort, plus il lâche de pièces : l'alien (plus fort) en donne plus, et le
+      // montant grimpe avec la force des ennemis (facteurForce, monte par vagues).
+      const PIECES_AST = 6; // pièces de base d'un astéroïde
+      const PIECES_ALIEN = 10; // pièces de base d'un alien (plus fort)
+      const RAYON_PIECE = 8; // taille d'une pièce posée au sol
 
       // Réglages de l'invincibilité (après un choc)
       const INVINCIBLE_DUREE = 2000; // durée d'invincibilité en ms (2 secondes)
@@ -69,7 +262,7 @@
         return {
           x: LARGEUR / 2,
           y: HAUTEUR / 2,
-          angle: -Math.PI / 2, // direction où il pointe (vers le haut au départ)
+          angle: -Math.PI / 2, // le triangle pointe toujours vers le haut (ne tourne plus)
           vitesseX: 0, // de combien il glisse à gauche/droite
           vitesseY: 0, // de combien il glisse en haut/bas
           // quelles flèches sont enfoncées en ce moment
@@ -79,16 +272,40 @@
             gauche: false,
             droite: false,
           },
+          // la position du doigt sur mobile : null tant qu'on ne touche pas l'écran,
+          // sinon {x, y} en coordonnées du jeu (le personnage glisse vers ce point)
+          cible: null,
+          // les vaisseaux qui tournent autour du personnage et tirent tout seuls.
+          // Chacun a son angle (sa position sur le cercle) et l'heure de son prochain tir.
+          // Au début : un seul, on pourra en ajouter avec les améliorations (étape 11).
+          // chaque vaisseau a son propre niveau (0 = base) : il décide de sa
+          // couleur et de sa puissance. Un vaisseau neuf est toujours au niveau 0.
+          vaisseaux: [{ angle: 0, prochainTir: 0, niveau: 0 }],
+          // stats des tirs des vaisseaux (améliorables dans la boutique)
+          vitesseMissile: VITESSE_MISSILE, // vitesse des missiles
+          degatsMissile: DEGATS_MISSILE, // dégâts de base (avant le bonus de niveau)
           // les listes d'objets qui apparaissent et disparaissent pendant le jeu
-          missiles: [], // les petites boules tirées avec Espace
-          asteroides: [], // les gros cailloux qui se déplacent
-          explosions: [], // les petites animations quand un astéroïde explose
+          missiles: [], // les petites boules tirées par les vaisseaux
+          ennemis: [], // les astéroïdes ET les aliens qui foncent sur le personnage
+          tirsAliens: [], // les tirs lancés par les aliens vers le personnage
+          piecesAuSol: [], // les pièces tombées des ennemis, à ramasser
+          explosions: [], // les petites animations quand un ennemi explose
+          // les vagues : numéro de vague, et combien d'ennemis restent à faire
+          // apparaître (préparés par demarrerVague au début de chaque vague)
+          vague: 1,
+          aSpawnerAst: 0,
+          aSpawnerAlien: 0,
+          prochainSpawn: 0,
           // le score et les points de vie
-          score: 0, // +10 à chaque astéroïde cassé
-          vies: 3, // les cœurs (3 maximum)
-          prochainCoeur: 100, // le prochain palier de score qui donnera un cœur
+          score: 0, // monte quand on tue un ennemi
+          pieces: 0, // monnaie pour les améliorations (étape 11)
+          prochainBonusPv: 150, // au prochain palier de score, on gagne +20 PV
+          pv: PV_MAX, // points de vie actuels
+          pvMax: PV_MAX, // points de vie maximum (augmentera avec les améliorations)
           invincibleJusqua: 0, // repère de temps : invincible tant qu'on n'a pas dépassé ce moment
-          partieFinie: false, // devient vrai quand il n'y a plus de cœurs
+          enPause: false, // le jeu est-il en pause ?
+          pauseDebut: 0, // heure du début de la pause (pour recaler les minuteurs au retour)
+          partieFinie: false, // devient vrai quand les PV tombent à 0
         };
       }
 
@@ -102,33 +319,16 @@
         return Math.sqrt(dx * dx + dy * dy);
       }
 
-      // Quand on APPUIE sur une flèche
+      // Quand on APPUIE sur une flèche (le personnage ne tire plus lui-même :
+      // ce seront les vaisseaux qui tournent autour qui tireront, voir étape 3)
       document.addEventListener("keydown", function (event) {
         if (event.key === "ArrowUp") etat.touches.haut = true;
         if (event.key === "ArrowDown") etat.touches.bas = true;
         if (event.key === "ArrowLeft") etat.touches.gauche = true;
         if (event.key === "ArrowRight") etat.touches.droite = true;
 
-        // Barre Espace : on crée un missile à la pointe du triangle
-        if (event.key === " ") {
-          event.preventDefault(); // empêche la page de défiler
-
-          // Si la touche est juste MAINTENUE, le navigateur renvoie keydown en
-          // rafale : on ignore ces répétitions pour n'avoir qu'UN missile par appui
-          if (event.repeat) return;
-
-          // La pointe du triangle est à RAYON_VAISSEAU devant le centre du vaisseau
-          const x = etat.x + Math.cos(etat.angle) * RAYON_VAISSEAU;
-          const y = etat.y + Math.sin(etat.angle) * RAYON_VAISSEAU;
-
-          // Le missile part tout droit dans la direction où le vaisseau pointe
-          etat.missiles.push({
-            x: x,
-            y: y,
-            vitesseX: Math.cos(etat.angle) * VITESSE_MISSILE,
-            vitesseY: Math.sin(etat.angle) * VITESSE_MISSILE,
-          });
-        }
+        // Touche P ou Échap : mettre en pause / reprendre
+        if (event.key === "p" || event.key === "Escape") basculerPause();
       });
 
       // Quand on RELÂCHE une flèche
@@ -147,29 +347,62 @@
         etat.touches.droite = false;
       });
 
-      // Fabrique un nouvel astéroïde et l'ajoute à la liste
-      function creerAsteroide() {
-        // Si on a déjà atteint le maximum d'astéroïdes, on ne fait rien
-        if (etat.asteroides.length >= MAX_AST) return;
+      // --- Déplacement au DOIGT (mobile) ---
 
-        // Il apparaît sur un bord au hasard de la map
-        let x, y;
+      // Convertit une position du doigt (en pixels de l'écran) vers les
+      // coordonnées du jeu. Comme on a zoomé le terrain de ZOOM, il suffit de
+      // diviser par ZOOM (le canvas occupe tout l'écran, à partir du coin haut-gauche).
+      function positionLogique(clientX, clientY) {
+        const rect = canvas.getBoundingClientRect();
+        return {
+          x: (clientX - rect.left) / ZOOM,
+          y: (clientY - rect.top) / ZOOM,
+        };
+      }
+
+      // Quand un doigt touche l'écran ou y glisse : on note où il est.
+      function doigtBouge(event) {
+        event.preventDefault(); // empêche la page de défiler / zoomer
+        const touch = event.touches[0]; // on suit le premier doigt
+        etat.cible = positionLogique(touch.clientX, touch.clientY);
+      }
+
+      // { passive: false } est nécessaire pour que preventDefault() marche sur touchmove
+      canvas.addEventListener("touchstart", doigtBouge, { passive: false });
+      canvas.addEventListener("touchmove", doigtBouge, { passive: false });
+
+      // Quand on lève le doigt : plus de cible, le personnage arrête de suivre
+      canvas.addEventListener("touchend", function () {
+        etat.cible = null;
+      });
+
+      // Renvoie une position au hasard sur un bord de l'écran, juste en DEHORS.
+      // "marge" = de combien on dépasse le bord (en général le rayon de l'ennemi).
+      function positionBord(marge) {
         if (Math.random() < 0.5) {
-          // sur un bord vertical (gauche ou droite), HORS écran
-          x = Math.random() < 0.5 ? -RAYON_AST : LARGEUR + RAYON_AST;
-          y = Math.random() * HAUTEUR;
+          // sur un bord vertical (gauche ou droite)
+          return {
+            x: Math.random() < 0.5 ? -marge : LARGEUR + marge,
+            y: Math.random() * HAUTEUR,
+          };
         } else {
-          // sur un bord horizontal (haut ou bas), HORS écran
-          x = Math.random() * LARGEUR;
-          y = Math.random() < 0.5 ? -RAYON_AST : HAUTEUR + RAYON_AST;
+          // sur un bord horizontal (haut ou bas)
+          return {
+            x: Math.random() * LARGEUR,
+            y: Math.random() < 0.5 ? -marge : HAUTEUR + marge,
+          };
         }
+      }
 
-        // Direction au hasard mais VERS l'intérieur de la map :
-        // on vise un point au hasard vers le centre, et on calcule l'angle
-        // qui va de l'astéroïde vers ce point.
-        const cibleX = 200 + Math.random() * 600; // entre 200 et 800
-        const cibleY = 200 + Math.random() * 600; // entre 200 et 800
-        const angle = Math.atan2(cibleY - y, cibleX - x);
+      // Fabrique un nouvel astéroïde qui FONCE vers le personnage.
+      function creerAsteroide() {
+        const depart = positionBord(RAYON_AST);
+
+        // Les ennemis deviennent plus forts toutes les 5 vagues
+        const degats = DEGATS_AST * facteurForce();
+
+        // Direction : du point de départ DROIT vers le personnage (au moment où il apparaît)
+        const angle = Math.atan2(etat.y - depart.y, etat.x - depart.x);
 
         // On fabrique une forme irrégulière (pas un rond parfait) :
         // ~10 points autour du centre, chacun avec un rayon un peu au hasard
@@ -181,18 +414,124 @@
           points.push({ dx: Math.cos(a) * r, dy: Math.sin(a) * r });
         }
 
-        etat.asteroides.push({
-          x: x,
-          y: y,
+        etat.ennemis.push({
+          type: "asteroide",
+          x: depart.x,
+          y: depart.y,
           vitesseX: Math.cos(angle) * VITESSE_AST,
           vitesseY: Math.sin(angle) * VITESSE_AST,
           rayon: RAYON_AST,
+          // PV : +20% des PV de base toutes les 5 vagues
+          pv: Math.round(
+            PV_AST * (1 + PV_FACTEUR_VAGUE * Math.floor(etat.vague / 5)),
+          ),
+          degats: Math.round(degats), // dégâts au personnage (montent avec les vagues)
+          valeur: POINTS_AST, // points de score gagnés en le détruisant
+          pieces: Math.round(PIECES_AST * facteurForce()), // plus fort = plus de pièces
           points: points,
         });
       }
 
-      // Toutes les 4 secondes, on essaie de créer un astéroïde
-      setInterval(creerAsteroide, INTERVALLE_AST);
+      // Fabrique un nouvel alien qui FONCE vers le personnage.
+      function creerAlien() {
+        const depart = positionBord(RAYON_ALIEN);
+        const angle = Math.atan2(etat.y - depart.y, etat.x - depart.x);
+
+        // Les ennemis deviennent plus forts toutes les 5 vagues
+        const degats = DEGATS_ALIEN * facteurForce();
+
+        etat.ennemis.push({
+          type: "alien",
+          x: depart.x,
+          y: depart.y,
+          vitesseX: Math.cos(angle) * VITESSE_ALIEN,
+          vitesseY: Math.sin(angle) * VITESSE_ALIEN,
+          rayon: RAYON_ALIEN,
+          // PV : +20% des PV de base toutes les 5 vagues
+          pv: Math.round(
+            PV_ALIEN * (1 + PV_FACTEUR_VAGUE * Math.floor(etat.vague / 5)),
+          ),
+          degats: Math.round(degats), // dégâts au personnage (montent avec les vagues)
+          valeur: POINTS_ALIEN, // points de score gagnés en le détruisant
+          pieces: Math.round(PIECES_ALIEN * facteurForce()), // plus fort = plus de pièces
+          // l'heure de son prochain tir (on attend un peu avant le premier)
+          prochainTir: Date.now() + INTERVALLE_TIR_ALIEN,
+        });
+      }
+
+      // --- LES VAGUES ---
+
+      // De combien les ennemis sont plus forts : x1.2 toutes les 5 vagues.
+      function facteurForce() {
+        return Math.pow(FORCE_FACTEUR, Math.floor(etat.vague / 5));
+      }
+
+      // Nombre maximum d'ennemis à l'écran en même temps : +2 toutes les 10 vagues.
+      function maxEnnemis() {
+        return (
+          MAX_ENNEMIS_BASE + MAX_ENNEMIS_BONUS * Math.floor(etat.vague / 10)
+        );
+      }
+
+      // Prépare la vague en cours : décide combien d'astéroïdes et d'aliens
+      // vont apparaître, puis ils sortiront un par un (toutes les INTERVALLE_SPAWN ms).
+      function demarrerVague() {
+        const v = etat.vague;
+
+        // Toutes les BOSS_TOUTES_LES vagues : grosse vague (beaucoup plus d'ennemis)
+        const estBoss = v % BOSS_TOUTES_LES === 0;
+        const facteur = estBoss ? BOSS_FACTEUR : 1;
+
+        // Nombre total d'ennemis : 4 au départ, +3 toutes les 5 vagues
+        // (et x2 sur une grosse vague).
+        const total = (4 + 3 * Math.floor(v / 5)) * facteur;
+
+        // Les aliens n'apparaissent qu'à partir de la vague VAGUE_ALIENS.
+        // Quand ils apparaissent, environ un tiers du groupe sont des aliens.
+        if (v >= VAGUE_ALIENS) {
+          etat.aSpawnerAlien = Math.floor(total / 3);
+          etat.aSpawnerAst = total - etat.aSpawnerAlien;
+        } else {
+          etat.aSpawnerAlien = 0;
+          etat.aSpawnerAst = total;
+        }
+        etat.prochainSpawn = Date.now() + INTERVALLE_SPAWN;
+      }
+
+      // Appelée à chaque image : fait apparaître les ennemis de la vague petit à
+      // petit, puis passe à la vague suivante quand l'écran est vide.
+      function gererVagues() {
+        const maintenant = Date.now();
+
+        // Reste-t-il des ennemis à faire apparaître pour cette vague ?
+        if (etat.aSpawnerAst > 0 || etat.aSpawnerAlien > 0) {
+          // ... mais seulement si on n'a pas atteint le maximum à l'écran
+          if (
+            maintenant >= etat.prochainSpawn &&
+            etat.ennemis.length < maxEnnemis()
+          ) {
+            // On sort un alien de temps en temps, sinon un astéroïde
+            if (etat.aSpawnerAlien > 0 && Math.random() < 0.4) {
+              creerAlien();
+              etat.aSpawnerAlien -= 1;
+            } else if (etat.aSpawnerAst > 0) {
+              creerAsteroide();
+              etat.aSpawnerAst -= 1;
+            } else {
+              creerAlien();
+              etat.aSpawnerAlien -= 1;
+            }
+            etat.prochainSpawn = maintenant + INTERVALLE_SPAWN;
+          }
+          return;
+        }
+
+        // Tout est sorti : la vague est finie quand il n'y a plus aucun ennemi
+        if (etat.ennemis.length === 0) {
+          etat.vague += 1;
+          demarrerVague();
+        }
+      }
 
       function rendu() {
         // Effacer tout l'écran
@@ -220,6 +559,45 @@
           ctx.restore(); // on remet le repère normal
         }
 
+        // Barre de vie au-dessus du personnage, en rouge, avec le nombre de PV écrit dessus
+        const largeurBarre = 50;
+        const hauteurBarre = 14;
+        const barreX = etat.x - largeurBarre / 2;
+        const barreY = etat.y - RAYON_VAISSEAU - 22;
+        const ratioPv = Math.max(0, etat.pv / etat.pvMax); // jamais en dessous de 0
+        // fond sombre (la partie déjà perdue)
+        ctx.fillStyle = "#400";
+        ctx.fillRect(barreX, barreY, largeurBarre, hauteurBarre);
+        // vie restante, en rouge
+        ctx.fillStyle = "red";
+        ctx.fillRect(barreX, barreY, largeurBarre * ratioPv, hauteurBarre);
+        // le nombre de PV écrit au centre de la barre, en blanc
+        ctx.fillStyle = "white";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(Math.round(etat.pv), etat.x, barreY + hauteurBarre / 2);
+        ctx.textAlign = "left"; // on remet l'alignement normal
+        ctx.textBaseline = "alphabetic"; // on remet la position verticale normale
+
+        // Dessiner les vaisseaux qui tournent autour (couleur selon LEUR niveau)
+        for (const v of etat.vaisseaux) {
+          ctx.fillStyle =
+            COULEURS_VAISSEAU[Math.min(v.niveau, COULEURS_VAISSEAU.length - 1)];
+          const vx = etat.x + Math.cos(v.angle) * RAYON_ORBITE;
+          const vy = etat.y + Math.sin(v.angle) * RAYON_ORBITE;
+          ctx.save();
+          ctx.translate(vx, vy); // on se place sur le vaisseau
+          ctx.rotate(v.angle); // il pointe vers l'extérieur du cercle
+          ctx.beginPath();
+          ctx.moveTo(TAILLE_VAISSEAU, 0); // la pointe
+          ctx.lineTo(-6, -6);
+          ctx.lineTo(-6, 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+
         // Dessiner les missiles (petites boules blanches)
         ctx.fillStyle = "white";
         for (const missile of etat.missiles) {
@@ -228,21 +606,58 @@
           ctx.fill();
         }
 
-        // Dessiner les astéroïdes (contour vert, intérieur noir, forme cabossée)
-        for (const ast of etat.asteroides) {
-          ctx.save();
-          ctx.translate(ast.x, ast.y); // on se place sur l'astéroïde
+        // Dessiner les tirs des aliens (petites boules rouges)
+        ctx.fillStyle = "red";
+        for (const t of etat.tirsAliens) {
           ctx.beginPath();
-          ctx.moveTo(ast.points[0].dx, ast.points[0].dy);
-          for (let i = 1; i < ast.points.length; i++) {
-            ctx.lineTo(ast.points[i].dx, ast.points[i].dy);
-          }
-          ctx.closePath();
-          ctx.fillStyle = "black"; // intérieur noir
+          ctx.arc(t.x, t.y, RAYON_TIR_ALIEN, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = "green"; // contour vert
-          ctx.lineWidth = 4;
-          ctx.stroke();
+        }
+
+        // Dessiner les pièces au sol (petits ronds dorés)
+        ctx.fillStyle = "gold";
+        for (const p of etat.piecesAuSol) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, RAYON_PIECE, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Dessiner les ennemis selon leur type
+        for (const e of etat.ennemis) {
+          ctx.save();
+          ctx.translate(e.x, e.y); // on se place sur l'ennemi
+
+          if (e.type === "asteroide") {
+            // astéroïde : forme cabossée, intérieur noir, contour vert
+            ctx.beginPath();
+            ctx.moveTo(e.points[0].dx, e.points[0].dy);
+            for (let i = 1; i < e.points.length; i++) {
+              ctx.lineTo(e.points[i].dx, e.points[i].dy);
+            }
+            ctx.closePath();
+            ctx.fillStyle = "black";
+            ctx.fill();
+            ctx.strokeStyle = "green";
+            ctx.lineWidth = 4;
+            ctx.stroke();
+          } else {
+            // alien : un rond violet avec un contour magenta
+            ctx.beginPath();
+            ctx.arc(0, 0, e.rayon, 0, Math.PI * 2);
+            ctx.fillStyle = "purple";
+            ctx.fill();
+            ctx.strokeStyle = "magenta";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+          }
+
+          // Le nombre de PV écrit au centre de l'ennemi, en blanc
+          ctx.fillStyle = "white";
+          ctx.font = "14px sans-serif";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(Math.round(e.pv), 0, 0);
+
           ctx.restore();
         }
 
@@ -263,38 +678,48 @@
         ctx.fillText("Score : " + etat.score, LARGEUR - 20, 40);
         ctx.textAlign = "left"; // on remet l'alignement normal pour la suite
 
-        // Dessiner les cœurs (en haut à gauche, en rouge)
-        ctx.fillStyle = "red";
-        for (let i = 0; i < etat.vies; i++) {
-          ctx.fillText("❤", 20 + i * 30, 40); // un cœur tous les 30 px
-        }
+        // Dessiner la vague (en haut à gauche, en vert)
+        ctx.fillText("Vague " + etat.vague, 20, 40);
+
+        // Dessiner les pièces (juste sous la vague, en doré)
+        ctx.fillStyle = "gold";
+        ctx.fillText("Pièces : " + etat.pieces, 20, 70);
 
         // Si la partie est finie : message au centre
         if (etat.partieFinie) {
           ctx.fillStyle = "white";
           ctx.font = "60px sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText("Partie terminée", LARGEUR / 2, 450);
+          ctx.fillText("Partie terminée", LARGEUR / 2, HAUTEUR / 2);
+          ctx.textAlign = "left"; // on remet l'alignement normal
+        }
+
+        // Si le jeu est en pause : voile sombre + message au centre
+        if (etat.enPause && !etat.partieFinie) {
+          ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+          ctx.fillRect(0, 0, LARGEUR, HAUTEUR);
+          ctx.fillStyle = "white";
+          ctx.font = "60px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("Pause", LARGEUR / 2, HAUTEUR / 2);
           ctx.textAlign = "left"; // on remet l'alignement normal
         }
       }
 
-      // Déplacer le vaisseau : rotation, accélération, freinage, inertie.
+      // Déplacer le vaisseau : il glisse dans les 4 directions (plus de rotation).
       function deplacerVaisseau() {
-        // Tourner avec gauche / droite
-        if (etat.touches.gauche) etat.angle -= ROTATION;
-        if (etat.touches.droite) etat.angle += ROTATION;
+        // Chaque flèche pousse directement dans sa direction
+        if (etat.touches.haut) etat.vitesseY -= ACCELERATION; // vers le haut
+        if (etat.touches.bas) etat.vitesseY += ACCELERATION; // vers le bas
+        if (etat.touches.gauche) etat.vitesseX -= ACCELERATION; // vers la gauche
+        if (etat.touches.droite) etat.vitesseX += ACCELERATION; // vers la droite
 
-        // Accélérer dans la direction où le vaisseau pointe
-        if (etat.touches.haut) {
-          etat.vitesseX += Math.cos(etat.angle) * ACCELERATION;
-          etat.vitesseY += Math.sin(etat.angle) * ACCELERATION;
-        }
-
-        // Freiner avec la flèche du bas
-        if (etat.touches.bas) {
-          etat.vitesseX *= FREINAGE;
-          etat.vitesseY *= FREINAGE;
+        // Sur mobile : si un doigt touche l'écran, on glisse vers sa position.
+        // La vitesse est proportionnelle à la distance restante : on fonce quand
+        // c'est loin, et on ralentit en arrivant près du doigt (déplacement doux).
+        if (etat.cible) {
+          etat.vitesseX = (etat.cible.x - etat.x) * 0.2;
+          etat.vitesseY = (etat.cible.y - etat.y) * 0.2;
         }
 
         // Ne pas dépasser la vitesse maximum
@@ -336,94 +761,206 @@
         });
       }
 
-      // Déplacer les astéroïdes, et retirer ceux sortis de la map.
-      // (avec une marge égale au rayon, pour ne pas les couper pile au bord)
-      function deplacerAsteroides() {
-        for (const ast of etat.asteroides) {
-          ast.x += ast.vitesseX;
-          ast.y += ast.vitesseY;
+      // Déplacer les ennemis. Comme le joueur, ils réapparaissent de l'autre
+      // côté de l'écran quand ils sortent (au lieu de disparaître).
+      function deplacerEnnemis() {
+        for (const e of etat.ennemis) {
+          e.x += e.vitesseX;
+          e.y += e.vitesseY;
+
+          // réapparaître du côté opposé une fois complètement sorti
+          if (e.x > LARGEUR + e.rayon) e.x = -e.rayon;
+          if (e.x < -e.rayon) e.x = LARGEUR + e.rayon;
+          if (e.y > HAUTEUR + e.rayon) e.y = -e.rayon;
+          if (e.y < -e.rayon) e.y = HAUTEUR + e.rayon;
+        }
+      }
+
+      // Déplacer les tirs des aliens, et retirer ceux sortis de l'écran
+      // ou qui ont touché le personnage.
+      function deplacerTirsAliens() {
+        for (const t of etat.tirsAliens) {
+          t.x += t.vitesseX;
+          t.y += t.vitesseY;
         }
 
-        etat.asteroides = etat.asteroides.filter(function (ast) {
+        etat.tirsAliens = etat.tirsAliens.filter(function (t) {
           return (
-            ast.x >= -ast.rayon &&
-            ast.x <= LARGEUR + ast.rayon &&
-            ast.y >= -ast.rayon &&
-            ast.y <= HAUTEUR + ast.rayon
+            !t.touche &&
+            t.x >= 0 &&
+            t.x <= LARGEUR &&
+            t.y >= 0 &&
+            t.y <= HAUTEUR
           );
         });
       }
 
-      // Le vaisseau touche-t-il un astéroïde ? Si oui : on perd un cœur.
-      // (on ne teste pas si on est déjà invincible après un choc récent)
-      function gererCollisionVaisseau() {
-        if (Date.now() < etat.invincibleJusqua) return;
+      // Faire tourner les vaisseaux autour du personnage et tirer tout seuls.
+      function gererVaisseaux() {
+        const maintenant = Date.now();
 
-        for (const ast of etat.asteroides) {
-          const d = distance(etat.x, etat.y, ast.x, ast.y);
+        for (const v of etat.vaisseaux) {
+          // Le vaisseau avance sur son cercle autour du personnage
+          v.angle += VITESSE_ORBITE;
 
-          // le vaisseau fait son rayon, l'astéroïde a le sien
-          if (d < ast.rayon + RAYON_VAISSEAU) {
-            etat.vies -= 1; // on perd un cœur
+          // Sa position = personnage + un point sur le cercle (rayon RAYON_ORBITE)
+          const vx = etat.x + Math.cos(v.angle) * RAYON_ORBITE;
+          const vy = etat.y + Math.sin(v.angle) * RAYON_ORBITE;
 
-            // On remet le vaisseau au centre, à l'arrêt
-            etat.x = LARGEUR / 2;
-            etat.y = HAUTEUR / 2;
-            etat.vitesseX = 0;
-            etat.vitesseY = 0;
+          // Tir automatique à intervalle régulier (toutes les INTERVALLE_TIR ms),
+          // vers l'extérieur du cercle (la direction où le vaisseau pointe).
+          if (maintenant >= v.prochainTir) {
+            etat.missiles.push({
+              x: vx,
+              y: vy,
+              vitesseX: Math.cos(v.angle) * etat.vitesseMissile,
+              vitesseY: Math.sin(v.angle) * etat.vitesseMissile,
+              // dégâts : base globale x1.5 par niveau de merge de CE vaisseau
+              degats: etat.degatsMissile * Math.pow(1.5, v.niveau),
+            });
 
-            // On devient invincible pendant 2 secondes pour se replacer
-            etat.invincibleJusqua = Date.now() + INVINCIBLE_DUREE;
-
-            // Plus de cœurs : la partie est finie
-            if (etat.vies <= 0) {
-              etat.partieFinie = true;
-              document.getElementById("rejouer").style.display = "block";
-            }
-
-            break; // un seul choc à la fois, on arrête de tester les astéroïdes
+            // On programme le prochain tir
+            v.prochainTir = maintenant + INTERVALLE_TIR;
           }
         }
       }
 
-      // Un missile touche-t-il un astéroïde ? Si oui : explosion, score, cœurs.
+      // Chaque alien tire vers le personnage à intervalle régulier.
+      function gererTirsAliens() {
+        const maintenant = Date.now();
+
+        for (const e of etat.ennemis) {
+          if (e.type !== "alien") continue; // seuls les aliens tirent
+
+          if (maintenant >= e.prochainTir) {
+            // angle qui va de l'alien vers le personnage (sa position actuelle)
+            const angle = Math.atan2(etat.y - e.y, etat.x - e.x);
+            etat.tirsAliens.push({
+              x: e.x,
+              y: e.y,
+              vitesseX: Math.cos(angle) * VITESSE_TIR_ALIEN,
+              vitesseY: Math.sin(angle) * VITESSE_TIR_ALIEN,
+              degats: DEGATS_ALIEN, // dégâts infligés s'il touche le personnage
+            });
+
+            // On programme le prochain tir de cet alien
+            e.prochainTir = maintenant + INTERVALLE_TIR_ALIEN;
+          }
+        }
+      }
+
+      // Le personnage ramasse les pièces qu'il touche : leur valeur va dans
+      // l'inventaire (etat.pieces) et la pièce disparaît du sol.
+      function ramasserPieces() {
+        for (const p of etat.piecesAuSol) {
+          if (
+            distance(etat.x, etat.y, p.x, p.y) <
+            RAYON_VAISSEAU + RAYON_PIECE
+          ) {
+            etat.pieces += p.valeur;
+            p.ramassee = true;
+          }
+        }
+
+        etat.piecesAuSol = etat.piecesAuSol.filter(function (p) {
+          return !p.ramassee;
+        });
+      }
+
+      // Le personnage subit "degats" points de dégâts, puis devient invincible
+      // un court instant. (Utilisé pour les contacts ET les tirs d'aliens.)
+      function subirChoc(degats) {
+        etat.pv -= degats; // on enlève les points de vie
+
+        // On devient invincible un court instant pour ne pas tout reperdre d'un coup
+        etat.invincibleJusqua = Date.now() + INVINCIBLE_DUREE;
+
+        // Plus de points de vie : la partie est finie
+        if (etat.pv <= 0) {
+          etat.pv = 0; // pour ne pas afficher de PV négatifs
+          etat.partieFinie = true;
+          document.getElementById("rejouer").style.display = "block";
+          boutonPause.style.display = "none"; // pas de pause sur l'écran de fin
+          boutonBoutique.style.display = "none"; // ni de boutique
+        }
+      }
+
+      // Le personnage est-il touché ? (par un ennemi au contact, OU par un tir d'alien)
+      // On ne teste pas si on est déjà invincible après un choc récent.
+      // Chaque danger enlève sa valeur "degats" (alien 15, astéroïde 10).
+      function gererCollisionVaisseau() {
+        if (Date.now() < etat.invincibleJusqua) return;
+
+        // Contact direct avec un ennemi
+        for (const e of etat.ennemis) {
+          if (distance(etat.x, etat.y, e.x, e.y) < e.rayon + RAYON_VAISSEAU) {
+            subirChoc(e.degats);
+            return; // un seul choc à la fois
+          }
+        }
+
+        // Touché par un tir d'alien
+        for (const t of etat.tirsAliens) {
+          if (
+            distance(etat.x, etat.y, t.x, t.y) <
+            RAYON_TIR_ALIEN + RAYON_VAISSEAU
+          ) {
+            t.touche = true; // le tir disparaît après avoir touché
+            subirChoc(t.degats);
+            return;
+          }
+        }
+      }
+
+      // Un missile touche-t-il un ennemi ? Si oui : explosion + score.
       function gererTirs() {
         for (const missile of etat.missiles) {
-          for (const ast of etat.asteroides) {
-            const d = distance(missile.x, missile.y, ast.x, ast.y);
+          for (const e of etat.ennemis) {
+            const d = distance(missile.x, missile.y, e.x, e.y);
 
-            if (d < ast.rayon) {
-              // Touché ! On marque les deux pour les retirer
-              missile.touche = true;
-              ast.touche = true;
+            if (d < e.rayon) {
+              missile.touche = true; // le missile est consommé au contact
+              e.pv -= missile.degats; // l'ennemi perd des points de vie
 
-              // On déclenche une explosion à la position de l'astéroïde
-              etat.explosions.push({
-                x: ast.x,
-                y: ast.y,
-                rayon: 5,
-                vie: 20,
-              });
+              // L'ennemi n'est détruit que si ses PV tombent à 0
+              if (e.pv <= 0) {
+                e.touche = true;
 
-              // Le score augmente de 10 pour chaque astéroïde cassé
-              etat.score += 10;
+                // On déclenche une explosion à la position de l'ennemi
+                etat.explosions.push({
+                  x: e.x,
+                  y: e.y,
+                  rayon: 5,
+                  vie: 20,
+                });
 
-              // Tous les 100 points : on gagne un cœur (mais 3 maximum)
-              // On utilise un while au cas où on franchit plusieurs paliers d'un coup
-              while (etat.score >= etat.prochainCoeur) {
-                if (etat.vies < 3) etat.vies += 1; // sinon (déjà 3) : on n'ajoute rien
-                etat.prochainCoeur += 100; // on passe au palier suivant
+                // Le score augmente selon le type d'ennemi (+15 alien, +10 astéroïde)
+                etat.score += e.valeur;
+
+                // Pièces lâchées AU SOL (à ramasser) : valeur calculée à la
+                // création selon la force de l'ennemi (type + montée des vagues)
+                etat.piecesAuSol.push({ x: e.x, y: e.y, valeur: e.pieces });
+
+                // Tous les 150 points de score : +20 points de vie (vie ET maximum).
+                // (un while au cas où on franchit plusieurs paliers d'un coup)
+                while (etat.score >= etat.prochainBonusPv) {
+                  etat.pvMax += 20;
+                  etat.pv += 20;
+                  etat.prochainBonusPv += 150; // palier suivant
+                }
               }
+
+              break; // un missile ne touche qu'un seul ennemi
             }
           }
         }
 
-        // On retire les missiles et astéroïdes qui ont été touchés
+        // On retire les missiles et ennemis qui ont été touchés
         etat.missiles = etat.missiles.filter(function (missile) {
           return !missile.touche;
         });
-        etat.asteroides = etat.asteroides.filter(function (ast) {
-          return !ast.touche;
+        etat.ennemis = etat.ennemis.filter(function (e) {
+          return !e.touche;
         });
       }
 
@@ -441,10 +978,22 @@
 
       // La boucle du jeu : à lire de haut en bas, ça résume tout le jeu.
       function boucle() {
+        // En pause : on ne met rien à jour, on dessine juste l'écran (avec le
+        // voile "Pause") et on arrête la boucle. Elle repart via basculerPause().
+        if (etat.enPause) {
+          rendu();
+          return;
+        }
+
+        gererVagues();
         deplacerVaisseau();
+        gererVaisseaux();
+        gererTirsAliens();
         deplacerMissiles();
-        deplacerAsteroides();
+        deplacerEnnemis();
+        deplacerTirsAliens();
         gererCollisionVaisseau();
+        ramasserPieces();
         gererTirs();
         animerExplosions();
         rendu();
@@ -456,19 +1005,217 @@
         requestAnimationFrame(boucle);
       }
 
+      // Le bouton Pause
+      const boutonPause = document.getElementById("pause");
+
+      // Mettre le jeu en pause (sans effet si déjà en pause).
+      function mettrePause() {
+        if (etat.enPause) return;
+        etat.enPause = true;
+        etat.pauseDebut = Date.now(); // pour recaler les minuteurs au retour
+        boutonPause.classList.add("lecture"); // l'icône devient un triangle "lecture"
+      }
+
+      // Reprendre le jeu (sans effet si pas en pause).
+      function reprendre() {
+        if (!etat.enPause) return;
+        // on décale tous les minuteurs de la durée de la pause, sinon on aurait
+        // une rafale de tirs/apparitions au redémarrage
+        const ecoule = Date.now() - etat.pauseDebut;
+        etat.prochainSpawn += ecoule;
+        etat.invincibleJusqua += ecoule;
+        for (const v of etat.vaisseaux) v.prochainTir += ecoule;
+        for (const e of etat.ennemis) {
+          if (e.type === "alien") e.prochainTir += ecoule;
+        }
+        etat.enPause = false;
+        boutonPause.classList.remove("lecture"); // l'icône redevient deux barres
+        boucle(); // on relance la boucle
+      }
+
+      // Le bouton Pause bascule entre les deux.
+      function basculerPause() {
+        if (etat.partieFinie) return; // pas de pause si la partie est finie
+        if (menuAmeliorations.classList.contains("ouvert")) return; // pas via la boutique
+        if (etat.enPause) reprendre();
+        else mettrePause();
+      }
+
+      // Pause au clic / au doigt sur le bouton
+      boutonPause.addEventListener("click", basculerPause);
+
+      // --- LA BOUTIQUE D'AMÉLIORATIONS ---
+      const boutonBoutique = document.getElementById("boutique");
+      const menuAmeliorations = document.getElementById("ameliorations");
+      const boutiquePieces = document.getElementById("boutique-pieces");
+      const boutiqueListe = document.getElementById("boutique-liste");
+      const boutonFermer = document.getElementById("fermer-boutique");
+
+      // De combien le prix d'une amélioration grimpe à chaque achat (x1.2).
+      const FACTEUR_COUT = 1.2;
+
+      // La liste des améliorations : nom, coût en pièces, effet, et parfois une
+      // condition (possible) pour pouvoir l'acheter.
+      const AMELIORATIONS = [
+        {
+          nom: "Ajouter un vaisseau",
+          cout: 25,
+          appliquer: function () {
+            // un vaisseau neuf est toujours au niveau de base (0)
+            etat.vaisseaux.push({ angle: 0, prochainTir: 0, niveau: 0 });
+            // on ré-espace tous les vaisseaux régulièrement autour du cercle
+            const n = etat.vaisseaux.length;
+            for (let i = 0; i < n; i++) {
+              etat.vaisseaux[i].angle = (i / n) * Math.PI * 2;
+            }
+          },
+        },
+        {
+          nom: "Combiner 2 vaisseaux (x1.5 puissance)",
+          cout: 42,
+          // possible seulement si DEUX vaisseaux ont le même niveau
+          possible: function () {
+            const niveaux = etat.vaisseaux
+              .map(function (v) {
+                return v.niveau;
+              })
+              .sort(function (a, b) {
+                return a - b;
+              });
+            for (let i = 0; i < niveaux.length - 1; i++) {
+              if (niveaux[i] === niveaux[i + 1]) return true;
+            }
+            return false;
+          },
+          appliquer: function () {
+            // on cherche deux vaisseaux de même niveau (les plus bas d'abord)
+            const tries = etat.vaisseaux.slice().sort(function (a, b) {
+              return a.niveau - b.niveau;
+            });
+            for (let i = 0; i < tries.length - 1; i++) {
+              if (tries[i].niveau === tries[i + 1].niveau) {
+                const a = tries[i];
+                const b = tries[i + 1];
+                // on retire ces deux vaisseaux...
+                etat.vaisseaux = etat.vaisseaux.filter(function (v) {
+                  return v !== a && v !== b;
+                });
+                // ...et on en met un seul, de niveau supérieur (plus puissant et
+                // d'une autre couleur)
+                etat.vaisseaux.push({
+                  angle: 0,
+                  prochainTir: 0,
+                  niveau: a.niveau + 1,
+                });
+                break;
+              }
+            }
+            // on ré-espace tous les vaisseaux régulièrement autour du cercle
+            const n = etat.vaisseaux.length;
+            for (let i = 0; i < n; i++) {
+              etat.vaisseaux[i].angle = (i / n) * Math.PI * 2;
+            }
+          },
+        },
+        {
+          nom: "Vitesse des balles +1",
+          cout: 15,
+          appliquer: function () {
+            etat.vitesseMissile += 1;
+          },
+        },
+        {
+          nom: "Points de vie +10",
+          cout: 12,
+          appliquer: function () {
+            etat.pvMax += 10;
+            etat.pv += 10;
+          },
+        },
+        {
+          nom: "Puissance des tirs x1.2",
+          cout: 20,
+          appliquer: function () {
+            etat.degatsMissile *= 1.2;
+          },
+        },
+      ];
+
+      // Acheter une amélioration si on a assez de pièces (et que c'est possible).
+      function acheter(a) {
+        if (etat.pieces < a.cout) return;
+        if (a.possible && !a.possible()) return;
+        etat.pieces -= a.cout;
+        a.appliquer();
+        a.cout = Math.round(a.cout * FACTEUR_COUT); // plus chère la prochaine fois
+        rafraichirBoutique(); // mettre à jour l'affichage
+      }
+
+      // On crée un bouton par amélioration, une seule fois au démarrage.
+      const boutonsAmelioration = [];
+      for (const a of AMELIORATIONS) {
+        a.coutBase = a.cout; // on garde le prix de départ pour le réinitialiser au Rejouer
+        const b = document.createElement("button");
+        b.textContent = a.nom + " — " + a.cout + " pièces";
+        b.addEventListener("click", function () {
+          acheter(a);
+        });
+        boutiqueListe.appendChild(b);
+        boutonsAmelioration.push({ bouton: b, amelioration: a });
+      }
+
+      // Mettre à jour le menu : pièces affichées + boutons grisés si pas achetables.
+      function rafraichirBoutique() {
+        boutiquePieces.textContent = "Pièces : " + etat.pieces;
+        for (const item of boutonsAmelioration) {
+          const a = item.amelioration;
+          // on réécrit le libellé pour montrer le coût courant (qui a pu monter)
+          item.bouton.textContent = a.nom + " — " + a.cout + " pièces";
+          const tropCher = etat.pieces < a.cout;
+          const impossible = a.possible && !a.possible();
+          item.bouton.disabled = tropCher || impossible;
+        }
+      }
+
+      // Ouvrir la boutique : on met en pause et on affiche le menu.
+      function ouvrirBoutique() {
+        if (etat.partieFinie) return;
+        mettrePause();
+        rafraichirBoutique();
+        menuAmeliorations.classList.add("ouvert");
+      }
+
+      // Fermer la boutique : on cache le menu et on reprend le jeu.
+      function fermerBoutique() {
+        menuAmeliorations.classList.remove("ouvert");
+        reprendre();
+      }
+
+      boutonBoutique.addEventListener("click", ouvrirBoutique);
+      boutonFermer.addEventListener("click", fermerBoutique);
+
       // Relancer une nouvelle partie : on remet tout l'état à zéro
       function rejouer() {
         etat = etatInitial();
+        demarrerVague(); // prépare la vague 1
 
-        // On cache le bouton et on relance la boucle
+        // on remet les prix des améliorations à leur valeur de départ
+        for (const a of AMELIORATIONS) a.cout = a.coutBase;
+
+        // On cache le bouton Rejouer, on réaffiche le bouton Pause, et on relance
         document.getElementById("rejouer").style.display = "none";
+        boutonPause.style.display = "flex";
+        boutonPause.classList.remove("lecture"); // icône deux barres
+        boutonBoutique.style.display = "block"; // on réaffiche la boutique
+        menuAmeliorations.classList.remove("ouvert"); // on s'assure que le menu est fermé
         boucle();
       }
 
       // Quand on clique sur le bouton Rejouer
       document.getElementById("rejouer").addEventListener("click", rejouer);
 
-      // Lancer la boucle
+      // Préparer la vague 1, puis lancer la boucle
+      demarrerVague();
       boucle();
     </script>
   </body>
