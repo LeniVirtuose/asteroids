@@ -193,6 +193,7 @@
       const ACCELERATION = 0.5; // poussée des flèches (plus grand = plus nerveux)
       const VITESSE_MAX = 8; // vitesse maximum
       const FROTTEMENT = 0.9; // ralentit tout seul quand on lâche les flèches
+      const SENSIBILITE_DOIGT = 0.8; // sur mobile : le perso bouge X fois plus que le doigt
       const PV_MAX = 60; // points de vie du personnage au départ
 
       // Réglages des missiles
@@ -272,9 +273,13 @@
             gauche: false,
             droite: false,
           },
-          // la position du doigt sur mobile : null tant qu'on ne touche pas l'écran,
-          // sinon {x, y} en coordonnées du jeu (le personnage glisse vers ce point)
-          cible: null,
+          // déplacement au doigt sur mobile : on ne suit PAS un point absolu.
+          // doigtPrecedent = dernière position connue du doigt (null si pas de doigt),
+          // glisseX/glisseY = de combien le doigt a glissé depuis la dernière image
+          // (le personnage bouge d'autant, puis on remet à zéro)
+          doigtPrecedent: null,
+          glisseX: 0,
+          glisseY: 0,
           // les vaisseaux qui tournent autour du personnage et tirent tout seuls.
           // Chacun a son angle (sa position sur le cercle) et l'heure de son prochain tir.
           // Au début : un seul, on pourra en ajouter avec les améliorations (étape 11).
@@ -360,20 +365,34 @@
         };
       }
 
-      // Quand un doigt touche l'écran ou y glisse : on note où il est.
-      function doigtBouge(event) {
+      // Quand un doigt TOUCHE l'écran : on note juste où il se pose, sans bouger
+      // le personnage. Il ne se déplacera que quand on GLISSE le doigt.
+      function doigtPose(event) {
         event.preventDefault(); // empêche la page de défiler / zoomer
         const touch = event.touches[0]; // on suit le premier doigt
-        etat.cible = positionLogique(touch.clientX, touch.clientY);
+        etat.doigtPrecedent = positionLogique(touch.clientX, touch.clientY);
+      }
+
+      // Quand le doigt GLISSE : on mesure de combien il a bougé depuis la dernière
+      // position, et on ajoute ce déplacement au personnage (mouvement relatif).
+      function doigtGlisse(event) {
+        event.preventDefault();
+        const touch = event.touches[0];
+        const position = positionLogique(touch.clientX, touch.clientY);
+        if (etat.doigtPrecedent) {
+          etat.glisseX += position.x - etat.doigtPrecedent.x;
+          etat.glisseY += position.y - etat.doigtPrecedent.y;
+        }
+        etat.doigtPrecedent = position; // on retient la nouvelle position
       }
 
       // { passive: false } est nécessaire pour que preventDefault() marche sur touchmove
-      canvas.addEventListener("touchstart", doigtBouge, { passive: false });
-      canvas.addEventListener("touchmove", doigtBouge, { passive: false });
+      canvas.addEventListener("touchstart", doigtPose, { passive: false });
+      canvas.addEventListener("touchmove", doigtGlisse, { passive: false });
 
-      // Quand on lève le doigt : plus de cible, le personnage arrête de suivre
+      // Quand on lève le doigt : on oublie sa position (plus de glissement)
       canvas.addEventListener("touchend", function () {
-        etat.cible = null;
+        etat.doigtPrecedent = null;
       });
 
       // Renvoie une position au hasard sur un bord de l'écran, juste en DEHORS.
@@ -714,15 +733,7 @@
         if (etat.touches.gauche) etat.vitesseX -= ACCELERATION; // vers la gauche
         if (etat.touches.droite) etat.vitesseX += ACCELERATION; // vers la droite
 
-        // Sur mobile : si un doigt touche l'écran, on glisse vers sa position.
-        // La vitesse est proportionnelle à la distance restante : on fonce quand
-        // c'est loin, et on ralentit en arrivant près du doigt (déplacement doux).
-        if (etat.cible) {
-          etat.vitesseX = (etat.cible.x - etat.x) * 0.2;
-          etat.vitesseY = (etat.cible.y - etat.y) * 0.2;
-        }
-
-        // Ne pas dépasser la vitesse maximum
+        // Ne pas dépasser la vitesse maximum (concerne les flèches du clavier)
         const vitesse = Math.sqrt(etat.vitesseX ** 2 + etat.vitesseY ** 2);
         if (vitesse > VITESSE_MAX) {
           etat.vitesseX = (etat.vitesseX / vitesse) * VITESSE_MAX;
@@ -736,6 +747,16 @@
         // Inertie (on bouge selon la vitesse)
         etat.x += etat.vitesseX;
         etat.y += etat.vitesseY;
+
+        // Sur mobile : on déplace le perso DIRECTEMENT de ce dont le doigt a glissé,
+        // multiplié par SENSIBILITE_DOIGT. On le fait APRÈS la vitesse pour que ce
+        // déplacement ne soit PAS plafonné par VITESSE_MAX (c'était ça le souci).
+        if (etat.glisseX !== 0 || etat.glisseY !== 0) {
+          etat.x += etat.glisseX * SENSIBILITE_DOIGT;
+          etat.y += etat.glisseY * SENSIBILITE_DOIGT;
+          etat.glisseX = 0; // on a consommé le glissement
+          etat.glisseY = 0;
+        }
 
         // Faire revenir le vaisseau de l'autre côté
         if (etat.x > LARGEUR) etat.x = 0;
