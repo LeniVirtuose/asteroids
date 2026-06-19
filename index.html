@@ -253,6 +253,16 @@
       const MAX_ENNEMIS_BONUS = 2; // +2 au max toutes les 10 vagues
       const MAX_ENNEMIS_BONUS_DUR = 2; // +2 de plus toutes les 10 vagues après VAGUE_DIFFICILE
 
+      // Réglages du laser de bord (toutes les LASER_TOUTES_LES vagues) :
+      // un voyant rouge prévient pendant LASER_ALERTE_MS, puis un laser traverse
+      // la map sur une ligne horizontale et enlève LASER_DEGATS PV si on est dessus.
+      const LASER_TOUTES_LES = 5; // un laser aux vagues multiples de 5 (5, 10, 15…)
+      const LASER_ALERTE_MS = 2000; // durée du voyant d'avertissement (2 s pour réagir)
+      const LASER_DUREE_MS = 250; // durée de l'éclair quand le laser tire
+      const LASER_DEGATS = 100; // PV enlevés si on est sur la trajectoire
+      const LASER_EPAISSEUR = 30; // épaisseur du trait rouge (sert aussi à la collision)
+      const COULEUR_LASER = "red"; // couleur du laser et du voyant
+
       // Réglages des pièces (lâchées par les ennemis tués). Plus un ennemi est
       // fort, plus il lâche de pièces : l'alien (plus fort) en donne plus, et le
       // montant grimpe avec la force des ennemis (facteurForce, monte par vagues).
@@ -310,6 +320,10 @@
           aSpawnerAst: 0,
           aSpawnerAlien: 0,
           prochainSpawn: 0,
+          // le laser de bord : phase ("inactif" | "alerte" | "tir"), la hauteur y
+          // de la ligne qu'il suit, l'heure de fin de la phase en cours, et un
+          // repère pour n'enlever les PV qu'une fois par laser.
+          laser: { phase: "inactif", y: 0, finPhase: 0, dejaTouche: false },
           // le score et les points de vie
           score: 0, // monte quand on tue un ennemi
           pieces: 0, // monnaie pour les améliorations (étape 11)
@@ -548,6 +562,48 @@
           etat.aSpawnerAst = total;
         }
         etat.prochainSpawn = Date.now() + INTERVALLE_SPAWN;
+
+        // Toutes les LASER_TOUTES_LES vagues : on déclenche l'avertissement du laser.
+        // On choisit une ligne horizontale au hasard, puis le voyant clignote
+        // pendant LASER_ALERTE_MS avant que le laser ne tire (voir gererLaser).
+        if (v % LASER_TOUTES_LES === 0) {
+          etat.laser.phase = "alerte";
+          etat.laser.y = Math.random() * HAUTEUR;
+          etat.laser.finPhase = Date.now() + LASER_ALERTE_MS;
+          etat.laser.dejaTouche = false;
+        }
+      }
+
+      // Fait avancer le laser dans le temps : alerte -> tir -> inactif. Pendant le
+      // tir, si le personnage est sur la ligne, il perd LASER_DEGATS PV (une fois).
+      function gererLaser() {
+        const maintenant = Date.now();
+        const laser = etat.laser;
+        if (laser.phase === "inactif") return;
+
+        if (laser.phase === "alerte") {
+          // Fin de l'avertissement : le laser tire maintenant.
+          if (maintenant >= laser.finPhase) {
+            laser.phase = "tir";
+            laser.finPhase = maintenant + LASER_DUREE_MS;
+          }
+          return;
+        }
+
+        if (laser.phase === "tir") {
+          // Le personnage est-il sur la ligne du laser ? (une seule fois par laser)
+          if (
+            !laser.dejaTouche &&
+            Math.abs(etat.y - laser.y) < LASER_EPAISSEUR / 2 + RAYON_VAISSEAU
+          ) {
+            laser.dejaTouche = true;
+            subirChoc(LASER_DEGATS);
+          }
+          // Fin de l'éclair : le laser disparaît.
+          if (maintenant >= laser.finPhase) {
+            laser.phase = "inactif";
+          }
+        }
       }
 
       // Appelée à chaque image : fait apparaître les ennemis de la vague petit à
@@ -721,6 +777,42 @@
           ctx.strokeStyle = "orange";
           ctx.stroke();
           ctx.globalAlpha = 1; // on remet l'opacité normale
+        }
+
+        // Dessiner le laser de bord selon sa phase
+        if (etat.laser.phase === "alerte") {
+          // Avertissement : une ligne fine clignotante + un voyant sur chaque bord
+          const clignote = Math.floor(Date.now() / 150) % 2 === 0;
+          if (clignote) {
+            ctx.strokeStyle = COULEUR_LASER;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(0, etat.laser.y);
+            ctx.lineTo(LARGEUR, etat.laser.y);
+            ctx.stroke();
+            // les deux voyants ronds sur les bords gauche et droit
+            ctx.fillStyle = COULEUR_LASER;
+            ctx.beginPath();
+            ctx.arc(12, etat.laser.y, 8, 0, Math.PI * 2);
+            ctx.arc(LARGEUR - 12, etat.laser.y, 8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (etat.laser.phase === "tir") {
+          // Le tir : un gros trait rouge avec une lueur plus large derrière
+          ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+          ctx.fillRect(
+            0,
+            etat.laser.y - LASER_EPAISSEUR,
+            LARGEUR,
+            LASER_EPAISSEUR * 2,
+          );
+          ctx.fillStyle = COULEUR_LASER;
+          ctx.fillRect(
+            0,
+            etat.laser.y - LASER_EPAISSEUR / 2,
+            LARGEUR,
+            LASER_EPAISSEUR,
+          );
         }
 
         // Dessiner le score (en haut à droite, en vert)
@@ -1044,6 +1136,7 @@
         }
 
         gererVagues();
+        gererLaser();
         deplacerVaisseau();
         gererVaisseaux();
         gererTirsAliens();
@@ -1082,6 +1175,7 @@
         const ecoule = Date.now() - etat.pauseDebut;
         etat.prochainSpawn += ecoule;
         etat.invincibleJusqua += ecoule;
+        if (etat.laser.phase !== "inactif") etat.laser.finPhase += ecoule;
         for (const v of etat.vaisseaux) v.prochainTir += ecoule;
         for (const e of etat.ennemis) {
           if (e.type === "alien") e.prochainTir += ecoule;
