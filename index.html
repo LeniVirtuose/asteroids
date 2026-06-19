@@ -243,9 +243,15 @@
       const BOSS_FACTEUR = 2; // 2x plus d'ennemis sur une grosse vague
       const VAGUE_ALIENS = 5; // les aliens apparaissent à partir de cette vague
       const FORCE_FACTEUR = 1.2; // dégâts des ennemis x1.2 toutes les 5 vagues
-      const PV_FACTEUR_VAGUE = 0.2; // +20% des PV de base des ennemis toutes les 5 vagues
+      // PV des ennemis : croissance GÉOMÉTRIQUE (comme la puissance du joueur qui
+      // monte vite avec les fusions/upgrades), sinon le jeu devient trop facile.
+      const PV_FACTEUR = 1.25; // PV x1.25 toutes les 5 vagues (jusqu'à VAGUE_DIFFICILE)
+      const VAGUE_DIFFICILE = 20; // au-delà, la difficulté accélère un peu
+      const PV_FACTEUR_DUR = 1.4; // après VAGUE_DIFFICILE : PV x1.4 toutes les 5 vagues
+      const VITESSE_FACTEUR_VAGUE = 0.03; // +3% de vitesse des ennemis toutes les 5 vagues
       const MAX_ENNEMIS_BASE = 9; // ennemis max à l'écran au départ
       const MAX_ENNEMIS_BONUS = 2; // +2 au max toutes les 10 vagues
+      const MAX_ENNEMIS_BONUS_DUR = 2; // +2 de plus toutes les 10 vagues après VAGUE_DIFFICILE
 
       // Réglages des pièces (lâchées par les ennemis tués). Plus un ennemi est
       // fort, plus il lâche de pièces : l'alien (plus fort) en donne plus, et le
@@ -440,13 +446,11 @@
           type: "asteroide",
           x: depart.x,
           y: depart.y,
-          vitesseX: Math.cos(angle) * VITESSE_AST,
-          vitesseY: Math.sin(angle) * VITESSE_AST,
+          vitesseX: Math.cos(angle) * VITESSE_AST * facteurVitesse(),
+          vitesseY: Math.sin(angle) * VITESSE_AST * facteurVitesse(),
           rayon: RAYON_AST,
-          // PV : +20% des PV de base toutes les 5 vagues
-          pv: Math.round(
-            PV_AST * (1 + PV_FACTEUR_VAGUE * Math.floor(etat.vague / 5)),
-          ),
+          // PV : croissance géométrique avec les vagues (accélère après VAGUE_DIFFICILE)
+          pv: Math.round(PV_AST * facteurPV()),
           degats: Math.round(degats), // dégâts au personnage (montent avec les vagues)
           valeur: POINTS_AST, // points de score gagnés en le détruisant
           pieces: Math.round(PIECES_AST * facteurForce()), // plus fort = plus de pièces
@@ -466,13 +470,11 @@
           type: "alien",
           x: depart.x,
           y: depart.y,
-          vitesseX: Math.cos(angle) * VITESSE_ALIEN,
-          vitesseY: Math.sin(angle) * VITESSE_ALIEN,
+          vitesseX: Math.cos(angle) * VITESSE_ALIEN * facteurVitesse(),
+          vitesseY: Math.sin(angle) * VITESSE_ALIEN * facteurVitesse(),
           rayon: RAYON_ALIEN,
-          // PV : +20% des PV de base toutes les 5 vagues
-          pv: Math.round(
-            PV_ALIEN * (1 + PV_FACTEUR_VAGUE * Math.floor(etat.vague / 5)),
-          ),
+          // PV : croissance géométrique avec les vagues (accélère après VAGUE_DIFFICILE)
+          pv: Math.round(PV_ALIEN * facteurPV()),
           degats: Math.round(degats), // dégâts au personnage (montent avec les vagues)
           valeur: POINTS_ALIEN, // points de score gagnés en le détruisant
           pieces: Math.round(PIECES_ALIEN * facteurForce()), // plus fort = plus de pièces
@@ -488,10 +490,38 @@
         return Math.pow(FORCE_FACTEUR, Math.floor(etat.vague / 5));
       }
 
-      // Nombre maximum d'ennemis à l'écran en même temps : +2 toutes les 10 vagues.
-      function maxEnnemis() {
+      // Multiplicateur de PV des ennemis : croissance géométrique par paliers de 5
+      // vagues. Avant VAGUE_DIFFICILE : x1.35 par palier. Après : x1.7 par palier,
+      // pour que ça ne devienne pas trop facile une fois le joueur bien équipé.
+      function facteurPV() {
+        const paliers = Math.floor(etat.vague / 5);
+        const paliersDouble = Math.floor(VAGUE_DIFFICILE / 5);
+        if (paliers <= paliersDouble) {
+          return Math.pow(PV_FACTEUR, paliers);
+        }
         return (
-          MAX_ENNEMIS_BASE + MAX_ENNEMIS_BONUS * Math.floor(etat.vague / 10)
+          Math.pow(PV_FACTEUR, paliersDouble) *
+          Math.pow(PV_FACTEUR_DUR, paliers - paliersDouble)
+        );
+      }
+
+      // Les ennemis vont aussi de plus en plus vite : +5% toutes les 5 vagues.
+      function facteurVitesse() {
+        return 1 + VITESSE_FACTEUR_VAGUE * Math.floor(etat.vague / 5);
+      }
+
+      // Nombre maximum d'ennemis à l'écran en même temps : +2 toutes les 10 vagues,
+      // et +3 supplémentaires toutes les 10 vagues une fois VAGUE_DIFFICILE passée.
+      function maxEnnemis() {
+        const palier10 = Math.floor(etat.vague / 10);
+        const palier10Dur = Math.max(
+          0,
+          palier10 - Math.floor(VAGUE_DIFFICILE / 10),
+        );
+        return (
+          MAX_ENNEMIS_BASE +
+          MAX_ENNEMIS_BONUS * palier10 +
+          MAX_ENNEMIS_BONUS_DUR * palier10Dur
         );
       }
 
