@@ -237,6 +237,16 @@
       const RAYON_TIR_ALIEN = 5; // taille du tir
       const INTERVALLE_TIR_ALIEN = 2000; // chaque alien tire toutes les 2 secondes
 
+      // Réglages des kamikazes (petits, très rapides, te POURSUIVENT sans arrêt).
+      // Ils n'apparaissent qu'à partir de la vague VAGUE_KAMIKAZE (plus fort = tard).
+      const RAYON_KAMIKAZE = 16; // petit
+      const VITESSE_KAMIKAZE = 2.6; // beaucoup plus rapide que l'alien
+      const PV_KAMIKAZE = 15; // fragile (meurt vite), mais rapide et nombreux
+      const DEGATS_KAMIKAZE = 12; // dégâts au contact modérés (montent avec les vagues)
+      const POINTS_KAMIKAZE = 25; // rapporte plus de score
+      const PIECES_KAMIKAZE = 14; // ... et plus de pièces
+      const VAGUE_KAMIKAZE = 20; // apparaît à partir de la vague 20
+
       // Réglages des vagues
       const INTERVALLE_SPAWN = 550; // temps entre 2 apparitions d'ennemis (ms)
       const BOSS_TOUTES_LES = 10; // grosse vague toutes les 10 vagues
@@ -250,7 +260,7 @@
       const PV_FACTEUR_DUR = 1.4; // après VAGUE_DIFFICILE : PV x1.4 toutes les 5 vagues
       const VITESSE_FACTEUR_VAGUE = 0.03; // +3% de vitesse des ennemis toutes les 5 vagues
       const MAX_ENNEMIS_BASE = 9; // ennemis max à l'écran au départ
-      const MAX_ENNEMIS_BONUS = 2; // +2 au max toutes les 10 vagues
+      const MAX_ENNEMIS_BONUS = 1; // +1 au max toutes les 10 vagues
       const MAX_ENNEMIS_BONUS_DUR = 2; // +2 de plus toutes les 10 vagues après VAGUE_DIFFICILE
 
       // Réglages du laser de bord (toutes les LASER_TOUTES_LES vagues) :
@@ -319,6 +329,7 @@
           vague: 1,
           aSpawnerAst: 0,
           aSpawnerAlien: 0,
+          aSpawnerKamikaze: 0,
           prochainSpawn: 0,
           // le laser de bord : phase ("inactif" | "alerte" | "tir"), la hauteur y
           // de la ligne qu'il suit, l'heure de fin de la phase en cours, et un
@@ -533,6 +544,29 @@
         });
       }
 
+      // Fabrique un kamikaze : petit, très rapide, et il RECALCULE sa direction
+      // vers le personnage à chaque image (voir deplacerEnnemis) au lieu d'aller
+      // tout droit. On lui donne sa vitesse une fois pour toutes (figée à la vague
+      // d'apparition), la direction étant gérée par la poursuite.
+      function creerKamikaze() {
+        const depart = positionBord(RAYON_KAMIKAZE);
+        const degats = DEGATS_KAMIKAZE * facteurForce();
+
+        etat.ennemis.push({
+          type: "kamikaze",
+          x: depart.x,
+          y: depart.y,
+          vitesseX: 0, // recalculé chaque image vers le personnage
+          vitesseY: 0,
+          vitesse: VITESSE_KAMIKAZE * facteurVitesse(), // sa vitesse de poursuite
+          rayon: RAYON_KAMIKAZE,
+          pv: Math.round(PV_KAMIKAZE * facteurPV()),
+          degats: Math.round(degats),
+          valeur: POINTS_KAMIKAZE,
+          pieces: Math.round(PIECES_KAMIKAZE * facteurForce()),
+        });
+      }
+
       // --- LES VAGUES ---
 
       // De combien les ennemis sont plus forts : x1.2 toutes les 5 vagues.
@@ -584,19 +618,28 @@
         const estBoss = v % BOSS_TOUTES_LES === 0;
         const facteur = estBoss ? BOSS_FACTEUR : 1;
 
-        // Nombre total d'ennemis : 4 au départ, +3 toutes les 5 vagues
+        // Nombre total d'ennemis : 4 au départ, +1 toutes les 5 vagues
         // (et x2 sur une grosse vague).
-        const total = (4 + 3 * Math.floor(v / 5)) * facteur;
+        const total = (4 + Math.floor(v / 5)) * facteur;
+
+        // Les kamikazes n'apparaissent qu'à partir de la vague VAGUE_KAMIKAZE :
+        // environ un quart du groupe.
+        if (v >= VAGUE_KAMIKAZE) {
+          etat.aSpawnerKamikaze = Math.floor(total / 4);
+        } else {
+          etat.aSpawnerKamikaze = 0;
+        }
 
         // Les aliens n'apparaissent qu'à partir de la vague VAGUE_ALIENS.
         // Quand ils apparaissent, environ un tiers du groupe sont des aliens.
         if (v >= VAGUE_ALIENS) {
           etat.aSpawnerAlien = Math.floor(total / 3);
-          etat.aSpawnerAst = total - etat.aSpawnerAlien;
         } else {
           etat.aSpawnerAlien = 0;
-          etat.aSpawnerAst = total;
         }
+
+        // Le reste du groupe, ce sont des astéroïdes.
+        etat.aSpawnerAst = total - etat.aSpawnerAlien - etat.aSpawnerKamikaze;
         etat.prochainSpawn = Date.now() + INTERVALLE_SPAWN;
 
         // Toutes les LASER_TOUTES_LES vagues : on déclenche l'avertissement du laser.
@@ -648,22 +691,33 @@
         const maintenant = Date.now();
 
         // Reste-t-il des ennemis à faire apparaître pour cette vague ?
-        if (etat.aSpawnerAst > 0 || etat.aSpawnerAlien > 0) {
+        if (
+          etat.aSpawnerAst > 0 ||
+          etat.aSpawnerAlien > 0 ||
+          etat.aSpawnerKamikaze > 0
+        ) {
           // ... mais seulement si on n'a pas atteint le maximum à l'écran
           if (
             maintenant >= etat.prochainSpawn &&
             etat.ennemis.length < maxEnnemis()
           ) {
-            // On sort un alien de temps en temps, sinon un astéroïde
-            if (etat.aSpawnerAlien > 0 && Math.random() < 0.4) {
+            // On sort un kamikaze ou un alien de temps en temps, sinon un
+            // astéroïde ; et s'il ne reste qu'un seul type, on le sort.
+            if (etat.aSpawnerKamikaze > 0 && Math.random() < 0.3) {
+              creerKamikaze();
+              etat.aSpawnerKamikaze -= 1;
+            } else if (etat.aSpawnerAlien > 0 && Math.random() < 0.4) {
               creerAlien();
               etat.aSpawnerAlien -= 1;
             } else if (etat.aSpawnerAst > 0) {
               creerAsteroide();
               etat.aSpawnerAst -= 1;
-            } else {
+            } else if (etat.aSpawnerAlien > 0) {
               creerAlien();
               etat.aSpawnerAlien -= 1;
+            } else {
+              creerKamikaze();
+              etat.aSpawnerKamikaze -= 1;
             }
             etat.prochainSpawn = maintenant + INTERVALLE_SPAWN;
           }
@@ -784,13 +838,27 @@
             ctx.strokeStyle = "green";
             ctx.lineWidth = 4;
             ctx.stroke();
-          } else {
+          } else if (e.type === "alien") {
             // alien : un rond violet avec un contour magenta
             ctx.beginPath();
             ctx.arc(0, 0, e.rayon, 0, Math.PI * 2);
             ctx.fillStyle = "purple";
             ctx.fill();
             ctx.strokeStyle = "magenta";
+            ctx.lineWidth = 3;
+            ctx.stroke();
+          } else {
+            // kamikaze : un losange rouge à contour jaune (couleur "danger")
+            const r = e.rayon;
+            ctx.beginPath();
+            ctx.moveTo(0, -r); // haut
+            ctx.lineTo(r, 0); // droite
+            ctx.lineTo(0, r); // bas
+            ctx.lineTo(-r, 0); // gauche
+            ctx.closePath();
+            ctx.fillStyle = "red";
+            ctx.fill();
+            ctx.strokeStyle = "yellow";
             ctx.lineWidth = 3;
             ctx.stroke();
           }
@@ -978,6 +1046,14 @@
       // côté de l'écran quand ils sortent (au lieu de disparaître).
       function deplacerEnnemis() {
         for (const e of etat.ennemis) {
+          // Le kamikaze recalcule sa direction vers le personnage à chaque image
+          // (poursuite), au lieu de garder la direction de départ comme les autres.
+          if (e.type === "kamikaze") {
+            const angle = Math.atan2(etat.y - e.y, etat.x - e.x);
+            e.vitesseX = Math.cos(angle) * e.vitesse;
+            e.vitesseY = Math.sin(angle) * e.vitesse;
+          }
+
           e.x += e.vitesseX;
           e.y += e.vitesseY;
 
@@ -1129,6 +1205,12 @@
         for (const e of etat.ennemis) {
           if (distance(etat.x, etat.y, e.x, e.y) < e.rayon + RAYON_VAISSEAU) {
             subirChoc(e.degats);
+            // Le kamikaze se "sacrifie" : il explose et disparaît au contact
+            // (gererTirs retire les ennemis marqués e.touche un peu plus loin).
+            if (e.type === "kamikaze") {
+              e.touche = true;
+              etat.explosions.push({ x: e.x, y: e.y, rayon: 5, vie: 20 });
+            }
             return; // un seul choc à la fois
           }
         }
