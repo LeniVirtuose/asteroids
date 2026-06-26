@@ -67,8 +67,8 @@
         bottom: 12px;
         left: 50%;
         transform: translateX(-50%);
-        padding: 14px 30px;
-        font-size: 22px;
+        padding: 18px 38px;
+        font-size: 26px;
         cursor: pointer;
       }
       /* Le menu des améliorations : voile plein écran, caché par défaut */
@@ -340,6 +340,70 @@
       // L'état de l'application
       let etat = etatInitial();
 
+      // Le nom du joueur (demandé une fois au démarrage, étape 0). Il sert à
+      // s'enregistrer dans le tableau des scores. On garde "Anonyme" par défaut.
+      let nomJoueur = "Anonyme";
+
+      // Vrai si le joueur vient de battre son record (pour l'afficher à la fin).
+      let nouveauRecord = false;
+
+      // Le classement est PARTAGÉ EN LIGNE grâce au service gratuit dreamlo.com.
+      // Deux codes : le privé sert à ÉCRIRE un score, le public à LIRE la liste.
+      // (Le code privé est visible ici : c'est normal avec dreamlo, OK pour un
+      //  jeu perso. Un joueur malin pourrait tricher en envoyant un faux score.)
+      const DREAMLO_PRIVE = "VkbHh3_Ln0KUgm6R9j4YCAXq1nXuZx3EWO4ya695wqoA";
+      const DREAMLO_PUBLIC = "6a3e49b88f40bb1318295b2a";
+
+      // Le top 5, rempli depuis dreamlo. Vide au départ (le temps du chargement).
+      let scores = [];
+
+      // Aller chercher les meilleurs scores en ligne et remplir "scores".
+      // fetch() prend un peu de temps : la fonction est "async" et on attend
+      // (await) la réponse. Si le réseau échoue, on garde simplement la liste vide.
+      async function chargerScores() {
+        try {
+          const reponse = await fetch(
+            "https://dreamlo.com/lb/" + DREAMLO_PUBLIC + "/json",
+          );
+          const data = await reponse.json();
+          // dreamlo renvoie soit rien, soit un seul objet, soit un tableau.
+          let entrees = data.dreamlo.leaderboard
+            ? data.dreamlo.leaderboard.entry
+            : [];
+          if (!Array.isArray(entrees)) entrees = [entrees]; // un seul score -> tableau
+          // dreamlo trie déjà du plus grand au plus petit ; on garde le top 5.
+          scores = entrees.slice(0, 5).map(function (e) {
+            return { nom: e.name, score: Number(e.score) };
+          });
+        } catch (e) {
+          scores = []; // pas de réseau : on n'empêche pas le jeu de tourner
+        }
+      }
+
+      // Envoyer un score en ligne, puis recharger le classement mis à jour.
+      // encodeURIComponent protège les noms avec espaces ou caractères spéciaux.
+      async function envoyerScore(nom, score) {
+        try {
+          await fetch(
+            "https://dreamlo.com/lb/" +
+              DREAMLO_PRIVE +
+              "/add/" +
+              encodeURIComponent(nom) +
+              "/" +
+              score,
+          );
+          await chargerScores();
+        } catch (e) {
+          // tant pis si l'envoi échoue : on ne bloque pas le jeu
+        }
+      }
+
+      // Le meilleur score = le premier du tableau (dreamlo le renvoie trié du
+      // plus grand au plus petit). 0 s'il n'y a encore aucun score en ligne.
+      function meilleurScore() {
+        return scores.length > 0 ? scores[0].score : 0;
+      }
+
       // Distance entre deux points (a et b). Sert à détecter les collisions.
       function distance(ax, ay, bx, by) {
         const dx = ax - bx;
@@ -357,6 +421,17 @@
 
         // Touche P ou Échap : mettre en pause / reprendre
         if (event.key === "p" || event.key === "Escape") basculerPause();
+
+        // Touche Espace : ouvrir / fermer le menu des améliorations
+        if (event.key === " " || event.code === "Space") {
+          event.preventDefault(); // empêche la page de défiler
+          if (etat.partieFinie) return;
+          if (menuAmeliorations.classList.contains("ouvert")) {
+            fermerBoutique();
+          } else {
+            ouvrirBoutique();
+          }
+        }
       });
 
       // Quand on RELÂCHE une flèche
@@ -829,12 +904,43 @@
         ctx.fillStyle = "gold";
         ctx.fillText("Pièces : " + etat.pieces, 20, 70);
 
+        // Étape 3 : le meilleur score, en haut au milieu de la page,
+        // en plus petit pour rester discret.
+        ctx.fillStyle = "green";
+        ctx.font = "16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Meilleur score : " + meilleurScore(), LARGEUR / 2, 30);
+        ctx.textAlign = "left"; // on remet l'alignement normal pour la suite
+
         // Si la partie est finie : message au centre
         if (etat.partieFinie) {
           ctx.fillStyle = "white";
           ctx.font = "60px sans-serif";
           ctx.textAlign = "center";
-          ctx.fillText("Partie terminée", LARGEUR / 2, HAUTEUR / 2);
+          ctx.fillText("Partie terminée", LARGEUR / 2, HAUTEUR / 2 - 40);
+
+          // Étape 4 : le score atteint pendant la partie, en dessous.
+          ctx.font = "28px sans-serif";
+          ctx.fillText("Score : " + etat.score, LARGEUR / 2, HAUTEUR / 2 + 20);
+
+          // Si on vient de battre le record : un message spécial, en doré.
+          if (nouveauRecord) {
+            ctx.fillStyle = "gold";
+            ctx.fillText("Nouveau record !", LARGEUR / 2, HAUTEUR / 2 + 110);
+          }
+
+          // Étape 8 : le tableau des 5 meilleurs scores, en dessous.
+          ctx.fillStyle = "white";
+          ctx.font = "22px sans-serif";
+          ctx.fillText("Meilleurs scores", LARGEUR / 2, HAUTEUR / 2 + 150);
+          ctx.font = "18px sans-serif";
+          for (let i = 0; i < scores.length; i++) {
+            // une ligne par score : "1. Léa — 120"
+            const ligne =
+              i + 1 + ". " + scores[i].nom + " — " + scores[i].score;
+            ctx.fillText(ligne, LARGEUR / 2, HAUTEUR / 2 + 180 + i * 26);
+          }
+
           ctx.textAlign = "left"; // on remet l'alignement normal
         }
 
@@ -1029,6 +1135,17 @@
         if (etat.pv <= 0) {
           etat.pv = 0; // pour ne pas afficher de PV négatifs
           etat.partieFinie = true;
+
+          // On regarde AVANT d'ajouter ce score au tableau si on bat le record
+          // actuel (sinon le record inclurait déjà la partie qu'on vient de finir).
+          if (etat.score > meilleurScore()) {
+            nouveauRecord = true; // pour afficher "Nouveau record !" à la fin
+          }
+
+          // On envoie le score au classement en ligne. dreamlo le range au bon
+          // endroit ; envoyerScore recharge ensuite la liste pour l'affichage.
+          envoyerScore(nomJoueur, etat.score);
+
           document.getElementById("rejouer").style.display = "block";
           boutonPause.style.display = "none"; // pas de pause sur l'écran de fin
           boutonBoutique.style.display = "none"; // ni de boutique
@@ -1353,6 +1470,7 @@
       // Relancer une nouvelle partie : on remet tout l'état à zéro
       function rejouer() {
         etat = etatInitial();
+        nouveauRecord = false; // on oublie le record battu de la partie précédente
         demarrerVague(); // prépare la vague 1
 
         // on remet les prix des améliorations à leur valeur de départ
@@ -1369,6 +1487,17 @@
 
       // Quand on clique sur le bouton Rejouer
       document.getElementById("rejouer").addEventListener("click", rejouer);
+
+      // Étape 0 : on demande son nom au joueur avant de lancer la partie.
+      // prompt() renvoie null si on annule : dans ce cas (ou si c'est vide),
+      // on garde le nom par défaut "Anonyme".
+      const nomSaisi = prompt("Ton nom ?");
+      if (nomSaisi && nomSaisi.trim() !== "") {
+        nomJoueur = nomSaisi.trim();
+      }
+
+      // On va chercher le classement en ligne (s'affichera dès qu'il arrive).
+      chargerScores();
 
       // Préparer la vague 1, puis lancer la boucle
       demarrerVague();
