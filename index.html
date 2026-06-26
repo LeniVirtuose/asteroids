@@ -347,59 +347,20 @@
       // Vrai si le joueur vient de battre son record (pour l'afficher à la fin).
       let nouveauRecord = false;
 
-      // Le classement est PARTAGÉ EN LIGNE grâce au service gratuit dreamlo.com.
-      // Deux codes : le privé sert à ÉCRIRE un score, le public à LIRE la liste.
-      // (Le code privé est visible ici : c'est normal avec dreamlo, OK pour un
-      //  jeu perso. Un joueur malin pourrait tricher en envoyant un faux score.)
-      const DREAMLO_PRIVE = "VkbHh3_Ln0KUgm6R9j4YCAXq1nXuZx3EWO4ya695wqoA";
-      const DREAMLO_PUBLIC = "6a3e49b88f40bb1318295b2a";
+      // Étape 6 : le tableau des meilleurs scores, sous forme
+      // [ { nom: "Léa", score: 120 }, ... ]. On le garde en mémoire dans le
+      // navigateur. localStorage ne stocke que du texte, donc on convertit
+      // l'objet en texte avec JSON.stringify, et on le relit avec JSON.parse.
+      // S'il n'y a encore rien d'enregistré, on part d'un tableau vide.
+      let scores = JSON.parse(localStorage.getItem("scores")) || [];
 
-      // Le top 5, rempli depuis dreamlo. Vide au départ (le temps du chargement).
-      let scores = [];
-
-      // Aller chercher les meilleurs scores en ligne et remplir "scores".
-      // fetch() prend un peu de temps : la fonction est "async" et on attend
-      // (await) la réponse. Si le réseau échoue, on garde simplement la liste vide.
-      async function chargerScores() {
-        try {
-          const reponse = await fetch(
-            "https://dreamlo.com/lb/" + DREAMLO_PUBLIC + "/json",
-          );
-          const data = await reponse.json();
-          // dreamlo renvoie soit rien, soit un seul objet, soit un tableau.
-          let entrees = data.dreamlo.leaderboard
-            ? data.dreamlo.leaderboard.entry
-            : [];
-          if (!Array.isArray(entrees)) entrees = [entrees]; // un seul score -> tableau
-          // dreamlo trie déjà du plus grand au plus petit ; on garde le top 5.
-          scores = entrees.slice(0, 5).map(function (e) {
-            return { nom: e.name, score: Number(e.score) };
-          });
-        } catch (e) {
-          scores = []; // pas de réseau : on n'empêche pas le jeu de tourner
-        }
+      // Petite fonction pour enregistrer le tableau des scores dans le navigateur.
+      function sauverScores() {
+        localStorage.setItem("scores", JSON.stringify(scores));
       }
 
-      // Envoyer un score en ligne, puis recharger le classement mis à jour.
-      // encodeURIComponent protège les noms avec espaces ou caractères spéciaux.
-      async function envoyerScore(nom, score) {
-        try {
-          await fetch(
-            "https://dreamlo.com/lb/" +
-              DREAMLO_PRIVE +
-              "/add/" +
-              encodeURIComponent(nom) +
-              "/" +
-              score,
-          );
-          await chargerScores();
-        } catch (e) {
-          // tant pis si l'envoi échoue : on ne bloque pas le jeu
-        }
-      }
-
-      // Le meilleur score = le premier du tableau (dreamlo le renvoie trié du
-      // plus grand au plus petit). 0 s'il n'y a encore aucun score en ligne.
+      // Le meilleur score = le premier du tableau (il est trié du plus grand au
+      // plus petit). 0 s'il n'y a encore aucun score enregistré.
       function meilleurScore() {
         return scores.length > 0 ? scores[0].score : 0;
       }
@@ -1142,9 +1103,15 @@
             nouveauRecord = true; // pour afficher "Nouveau record !" à la fin
           }
 
-          // On envoie le score au classement en ligne. dreamlo le range au bon
-          // endroit ; envoyerScore recharge ensuite la liste pour l'affichage.
-          envoyerScore(nomJoueur, etat.score);
+          // Étape 7 : on ajoute le score de la partie au tableau, on le trie du
+          // plus grand au plus petit, on ne garde que les 5 meilleurs, puis on
+          // enregistre le tout dans le navigateur.
+          scores.push({ nom: nomJoueur, score: etat.score });
+          scores.sort(function (a, b) {
+            return b.score - a.score; // ordre décroissant
+          });
+          scores = scores.slice(0, 5); // on ne garde que le top 5
+          sauverScores();
 
           document.getElementById("rejouer").style.display = "block";
           boutonPause.style.display = "none"; // pas de pause sur l'écran de fin
@@ -1495,9 +1462,6 @@
       if (nomSaisi && nomSaisi.trim() !== "") {
         nomJoueur = nomSaisi.trim();
       }
-
-      // On va chercher le classement en ligne (s'affichera dès qu'il arrive).
-      chargerScores();
 
       // Préparer la vague 1, puis lancer la boucle
       demarrerVague();
